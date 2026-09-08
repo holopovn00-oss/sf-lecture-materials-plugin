@@ -1,0 +1,20 @@
+{
+  "name": "sf-lecture-materials",
+  "interface": {
+    "displayName": "Sf Lecture Materials"
+  },
+  "plugins": [
+    {
+      "name": "sf-lecture-materials",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sf-lecture-materials"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

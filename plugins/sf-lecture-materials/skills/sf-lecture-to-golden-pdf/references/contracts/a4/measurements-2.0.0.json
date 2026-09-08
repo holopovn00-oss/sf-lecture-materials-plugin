@@ -1,0 +1,79 @@
+{
+  "schema_version": "2.0.0",
+  "source": {
+    "golden_sha256": "0188F5614446EEBAD7ED5A1CCD54448B8B27E3E99B8242B85BAC1BD0501DA949"
+  },
+  "basis": "Approved A33-A45 and M01-M20; visible glyph geometry replaces old character capacities",
+  "approved_geometry": {
+    "content_x_mm": 22,
+    "content_width_mm": 174,
+    "column_width_mm": 84,
+    "column_gap_mm": 6,
+    "reading_order": "block-left-right-then-next-block",
+    "bottom_mm": 272,
+    "paragraph_extra_gap_mm": 4
+  },
+  "approved_typography": {
+    "body": [
+      9.5,
+      13.1
+    ],
+    "topic": [
+      26,
+      29
+    ],
+    "cover": [
+      44,
+      46
+    ],
+    "caption": [
+      7.75,
+      10.5
+    ],
+    "toc_section": [
+      10.5,
+      13
+    ],
+    "toc_topic": [
+      8.2,
+      10.5
+    ],
+    "section_label": [
+      7.75,
+      10.5
+    ],
+    "footer": 8.2,
+    "page_number": 8.5
+  },
+  "pattern_extraction": {
+    "source_sha256": "0188F5614446EEBAD7ED5A1CCD54448B8B27E3E99B8242B85BAC1BD0501DA949",
+    "cover": {
+      "xref": 8,
+      "size": [
+        2481,
+        2414
+      ],
+      "alpha_max": 26,
+      "additional_opacity": 0.18
+    },
+    "internal": {
+      "page": 4,
+      "graphics_state": "G56",
+      "bbox_mm": [
+        127.469,
+        168.323,
+        117.83008429981356,
+        159.34750164153044
+      ],
+      "opacity_baked": 0.1,
+      "size": [
+        1392,
+        1883
+      ]
+    },
+    "assets": {
+      "cover-pattern-2.0.0.png": "DEADAF51B588EC5A6311C5118A5308E7E3964328D31B2658E8D0337DCCBB97A0",
+      "internal-pattern-2.0.0.png": "FDBF71ABA7D5134876DCEEFABEE3081C7472D34ACF875FDA999E2E828B659464"
+    }
+  }
+}

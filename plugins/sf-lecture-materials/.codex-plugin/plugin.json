@@ -1,0 +1,30 @@
+{
+  "name": "sf-lecture-materials",
+  "version": "0.1.0",
+  "description": "Полный лекционный текст из транскрипта и A4 PDF SF Education с проверкой содержания, изображений, навигации и баланса колонок.",
+  "author": {
+    "name": "holopovn00-oss",
+    "url": "https://github.com/holopovn00-oss"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SF Lecture Materials",
+    "shortDescription": "Транскрипт → полный текст → PDF SF Education.",
+    "longDescription": "Два самостоятельных навыка для сохранения полного содержания лекций и выпуска A4 PDF по закреплённому эталону. Включает Inter, ресурсы оформления и локальные проверки текста, изображений, ссылок и равномерного распределения текста между колонками.",
+    "developerName": "holopovn00-oss",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Подготовь материалы лекции из указанного транскрипта: сначала полный отредактированный текст для проверки, затем PDF по правилам SF Education.",
+    "logo": "./skills/sf-lecture-to-golden-pdf/assets/a4/sf-internal-lockup.png",
+    "brandColor": "#0089FF"
+  },
+  "repository": "https://github.com/holopovn00-oss/sf-lecture-materials-plugin",
+  "homepage": "https://github.com/holopovn00-oss/sf-lecture-materials-plugin#readme",
+  "keywords": [
+    "lectures",
+    "transcripts",
+    "pdf",
+    "sf-education",
+    "russian"
+  ]
+}

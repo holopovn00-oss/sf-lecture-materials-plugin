@@ -1,0 +1,34 @@
+{
+  "captured_at": "2026-09-07",
+  "source_plugin": "SF Lecture Publisher",
+  "source_runtime_version": "2.0.5",
+  "source_bundle_version": "2.0.5+codex.20260903025311",
+  "scope": "Standalone skills derived from local editorial and A4 contracts; not public controller stage tools.",
+  "sources": [
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/resources/skills/lecture-text/SKILL.md",
+      "sha256": "45672CD0C3D4AA55F193888B22623657DC3DA5E4AC4BE972D44BC2BFD0B70FFA"
+    },
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/resources/skills/review-lecture-text/SKILL.md",
+      "sha256": "CB5323D3BB19A58AB5B5F53E4ACCAF387C3AC6F03E7B758C74F03073AFAC5EDC"
+    },
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/resources/task_contracts/lecture_text/contract.json",
+      "sha256": "3428ACCBD9238C65CF4DF00524EC6CF9A6924E47189B60B0056AA49965F80C00"
+    },
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/resources/schemas/lecture-text.json",
+      "sha256": "0FABBD95C4F7456E551951B8C8B9392FFBF7DA7E1BFD3199CB96DC4FB7436E82"
+    },
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/lecture_text.py",
+      "sha256": "1356B98692A6BED61E9079E3FF46C798F06B5D6B3F5EA0B9363141D14BC73BB9"
+    },
+    {
+      "path": "runtime-2.0.5/Lib/site-packages/sf_lecture_publisher/lecture_ir.py",
+      "sha256": "622E90FD2A504086854D5192AC3B5FE4A3B4FC3E2EF8E13A65482EE51DABF9AA"
+    }
+  ],
+  "source_path_basis": "Relative to the original SF-Lecture-Publisher installation; historical provenance, not a runtime dependency."
+}

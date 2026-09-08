@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0.0",
+  "source_golden_sha256": "0188F5614446EEBAD7ED5A1CCD54448B8B27E3E99B8242B85BAC1BD0501DA949",
+  "status": "PENDING_T06_T07_VALIDATION",
+  "required_evidence": [
+    "actual-pdf-fonts-and-geometry",
+    "exact-source-spans-and-reading-order",
+    "all-pages-rasterized-and-reviewed",
+    "all-internal-link-targets",
+    "no-clipping-or-overlap"
+  ],
+  "validation_claim": false
+}

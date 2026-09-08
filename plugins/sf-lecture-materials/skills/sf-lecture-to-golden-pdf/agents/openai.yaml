@@ -1,0 +1,4 @@
+interface:
+  display_name: "SF: лекционный текст → Golden Gate PDF"
+  short_description: "A4 PDF по эталону SF с полной постраничной проверкой"
+  default_prompt: "Используй $sf-lecture-to-golden-pdf для создания PDF из указанного готового лекционного текста по Golden Gate SF Education."

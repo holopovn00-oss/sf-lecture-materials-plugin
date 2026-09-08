@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+output/
+tmp/
+*.log
+candidate-manifest.json
+accepted-manifest.json
+source-manifest.json
+text-review.json
+visual-review.json
