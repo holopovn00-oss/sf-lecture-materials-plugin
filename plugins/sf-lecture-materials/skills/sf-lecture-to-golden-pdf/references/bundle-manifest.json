@@ -29,5 +29,5 @@
     "references/contracts/a4/document-golden-gate-2.1.0.json": "8452A5CD3B2A055AC4589D3D3F7B5B037EAFE6BF1CDA9C618927D5520D146A97",
     "references/adapters/a4/2.1.0.json": "5964A5AB7A167AB4412A590CD1C728D74ADC5EC96A338B70C454AA56BBE17B4A"
   },
-  "plugin_version": "0.3.0"
+  "plugin_version": "0.4.1"
 }

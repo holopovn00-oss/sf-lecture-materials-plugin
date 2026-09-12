@@ -12,6 +12,12 @@ spec.loader.exec_module(verifier)
 
 
 class BundleTests(unittest.TestCase):
+    def test_resource_manifest_tracks_plugin_release(self):
+        plugin_root = SCRIPT.parents[3]
+        plugin = json.loads((plugin_root / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        bundle = json.loads((SCRIPT.parents[1] / "references/bundle-manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(bundle["plugin_version"], plugin["version"])
+
     def make_fixture(self, root):
         (root / "references").mkdir()
         data = b"pinned asset"

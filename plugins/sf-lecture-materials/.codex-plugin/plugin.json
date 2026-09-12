@@ -1,6 +1,6 @@
 {
   "name": "sf-lecture-materials",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Единый запуск SF: приём материалов, выбор результата, редактура, фактчек с решениями человека и PDF.",
   "author": {
     "name": "holopovn00-oss",
