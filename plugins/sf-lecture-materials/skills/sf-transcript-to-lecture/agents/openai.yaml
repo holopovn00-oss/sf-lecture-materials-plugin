@@ -1,4 +1,4 @@
 interface:
-  display_name: "SF: транскрипт → лекционный текст"
-  short_description: "Полный текст лекции с сохранением смысла и голоса"
-  default_prompt: "Используй $sf-transcript-to-lecture для переработки указанного транскрипта в полный лекционный текст с исходными привязками."
+  display_name: "SF: транскрипт → учебный текст JSON"
+  short_description: "Полное объяснение в JSON с абзацами и LaTeX"
+  default_prompt: "Используй $sf-transcript-to-lecture для подготовки полного учебно-методического текста только в JSON со смысловыми абзацами, LaTeX и исходными привязками."

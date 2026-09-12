@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sf.education/sf-lecture-publisher/schemas/lecture-text/2.0.0",
+  "$id": "https://sf.education/sf-lecture-materials/schemas/lecture-text/3.0.0",
   "type": "object",
   "required": [
     "schema_version",
@@ -12,11 +12,12 @@
     "content_hash",
     "title",
     "structure",
-    "source_locators"
+    "source_locators",
+    "editorial_mode"
   ],
   "properties": {
     "schema_version": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "folder_id": {
       "type": "string",
@@ -30,27 +31,118 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "object"
+        "type": "object",
+        "required": [
+          "text_block_id",
+          "source_block_ids",
+          "content"
+        ],
+        "properties": {
+          "text_block_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_block_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "content": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/paragraph"
+                },
+                {
+                  "$ref": "#/$defs/display_math"
+                }
+              ]
+            }
+          }
+        },
+        "additionalProperties": false
       }
     },
     "transformation_ledger": {
       "type": "array",
       "items": {
-        "type": "object"
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "source_block_id",
+              "disposition",
+              "reason"
+            ],
+            "properties": {
+              "source_block_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "disposition": {
+                "const": "removed_nonsemantic"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "source_block_id",
+              "disposition",
+              "reason",
+              "start",
+              "end",
+              "quote"
+            ],
+            "properties": {
+              "source_block_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "disposition": {
+                "const": "removed_nonsemantic_span"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
       }
     },
     "assertions": {
       "type": "object",
       "required": [
         "complete_source_accounting",
-        "direct_perspective_tags",
         "semantic_review_required"
       ],
       "properties": {
         "complete_source_accounting": {
-          "const": true
-        },
-        "direct_perspective_tags": {
           "const": true
         },
         "semantic_review_required": {
@@ -148,7 +240,169 @@
           "type": "object"
         }
       }
+    },
+    "editorial_mode": {
+      "const": "study_guide"
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "math": {
+      "type": "object",
+      "required": [
+        "type",
+        "formula_id",
+        "latex",
+        "source_block_ids"
+      ],
+      "properties": {
+        "type": {
+          "const": "math"
+        },
+        "formula_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+        },
+        "latex": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "source_block_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "path",
+            "sha256",
+            "locator"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[A-Fa-f0-9]{64}$"
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "display_math": {
+      "type": "object",
+      "required": [
+        "type",
+        "formula_id",
+        "latex",
+        "source_block_ids"
+      ],
+      "properties": {
+        "type": {
+          "const": "display_math"
+        },
+        "formula_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+        },
+        "latex": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "source_block_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "path",
+            "sha256",
+            "locator"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[A-Fa-f0-9]{64}$"
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "text": {
+      "type": "object",
+      "required": [
+        "type",
+        "text"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^\\r\\n]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "paragraph": {
+      "type": "object",
+      "required": [
+        "type",
+        "runs"
+      ],
+      "properties": {
+        "type": {
+          "const": "paragraph"
+        },
+        "runs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/text"
+              },
+              {
+                "$ref": "#/$defs/math"
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

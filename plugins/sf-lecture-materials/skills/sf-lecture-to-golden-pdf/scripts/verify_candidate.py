@@ -10,6 +10,10 @@ import json
 import math
 from pathlib import Path
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def require(condition, message):
@@ -147,10 +151,94 @@ def check_columns(doc, lecture, text_rows, profile):
     return result
 
 
+def check_media_navigation(doc, composition, plan, block_ids, text_rows):
+    import fitz
+    from PIL import Image
+    def page_at(number):
+        require(type(number) is int and 1 <= number <= len(doc), "Unknown page")
+        return doc[number - 1]
+    visuals = composition.get("visuals")
+    placed = plan.get("visuals")
+    require(isinstance(visuals, list) and isinstance(placed, list), "Missing visual lists")
+    ids = [v["visual_id"] for v in visuals]
+    require(len(set(ids)) == len(ids) and [v["visual_id"] for v in placed] == ids, "Missing/reordered/duplicate visual")
+    for visual, placement in zip(visuals, placed):
+        image_path, source_path = checked(visual["image"]), checked(visual["source"])
+        require(isinstance(visual.get("role"), str) and visual["role"].strip() and isinstance(visual.get("caption"), str) and visual["caption"].strip(), "Missing visual role/caption")
+        anchors = visual.get("text_block_ids")
+        require(isinstance(anchors, list) and anchors and set(anchors) <= set(block_ids), "Unknown visual text anchors")
+        if "frame" in visual:
+            frame_path = checked(visual["frame"])
+            pts = visual.get("pts_seconds")
+            require(type(pts) in {int, float} and math.isfinite(pts) and pts >= 0, "Missing decoded frame time")
+            require(isinstance(visual.get("video_binding"), str) and visual["video_binding"].strip(), "Missing video binding")
+            with Image.open(frame_path) as frame, Image.open(image_path) as image:
+                box = visual.get("crop_box")
+                require(isinstance(box, list) and len(box) == 4 and all(type(v) is int for v in box), "Invalid crop box")
+                require(0 <= box[0] < box[2] <= frame.width and 0 <= box[1] < box[3] <= frame.height, "Crop outside source frame")
+                crop = frame.convert("RGB").crop(tuple(box))
+                require(crop.size == image.size and crop.tobytes() == image.convert("RGB").tobytes(), "Crop pixels differ from original frame")
+        page = page_at(placement["page"])
+        rect = rectangle(placement["bbox"], page)
+        pix = fitz.Pixmap(str(image_path))
+        if pix.alpha:
+            pix = fitz.Pixmap(pix, 0)
+        if pix.n != 3:
+            pix = fitz.Pixmap(fitz.csRGB, pix)
+        require(abs(rect.width/rect.height - pix.width/pix.height) <= 0.002, "Visual aspect ratio changed")
+        matches = [i for i in page.get_image_info(hashes=True) if i["digest"] == pix.digest and max(abs(a-b) for a,b in zip(i["bbox"], rect)) < 0.6]
+        require(len(matches) == 1, "Chosen visual is missing/changed in PDF")
+        require(any(r.get("visual_id") == visual["visual_id"] and r["text"] == visual["caption"] for r in text_rows), "Visual caption is not tied to planned PDF text")
+    links = plan.get("links")
+    require(isinstance(links, list), "Missing link plan")
+    actual_links = [(page.number, link, internal_link_target(doc, link)) for page in doc for link in page.get_links()]
+    for item in links:
+        page = page_at(item["page"])
+        target = page_at(item["target_page"])
+        rect = rectangle(item["bbox"], page)
+        require(any(number == page.number and destination == target.number and max(abs(a-b) for a,b in zip(link["from"], rect)) < 0.6 for number,link,destination in actual_links), "Missing/wrong internal link")
+    require(len(actual_links) == len(links) and all(destination is not None for _,_,destination in actual_links), "Unexpected/broken navigation")
+    require(doc.get_toc() == plan.get("bookmarks"), "Bookmarks differ from plan")
+    require(all(type(row[2]) is int and 1 <= row[2] <= len(doc) for row in plan["bookmarks"]), "Bookmark target outside PDF")
+    return visuals, links
+
+
+def check_reports(doc, manifest, refs, lecture, by_id):
+    visual_status = "NOT_RECORDED"
+    if manifest.get("visual_review") is not None:
+        review = read(checked(manifest["visual_review"]))
+        require(review.get("pdf_sha256", "").upper() == refs["pdf"]["sha256"].upper(), "Visual report belongs to a different PDF")
+        pages = review.get("pages")
+        require(isinstance(pages, list) and [p.get("page") for p in pages] == list(range(1,len(doc)+1)), "Incomplete visual report coverage")
+        for row in pages:
+            require(row.get("status") in {"PASS", "REVIEW_REQUIRED"} and isinstance(row.get("observation"), str) and row["observation"].strip(), "Missing page observation")
+            checked(row["raster"])
+        visual_status = "RECORDED_NOT_AUTHENTICATED"
+    text_status = "NOT_RECORDED"
+    if manifest.get("text_review") is not None:
+        review = read(checked(manifest["text_review"]))
+        require(review["artifacts"]["lecture"]["sha256"].upper() == refs["lecture"]["sha256"].upper(), "Text review belongs to another lecture")
+        for decision in review["decisions"]:
+            if decision["execution"] == "pending":
+                continue
+            for target in decision["targets"]:
+                if target["layer"] == "formula":
+                    from lecture_content import validate_content
+                    value = validate_content(lecture["blocks"])[target["id"]]["latex"]
+                else:
+                    value = lecture["title"] if target["layer"] == "title" else by_id[target["id"]]
+                require(value.count(target["expected"]) == target["count"], "Recorded text decision is not preserved")
+        text_status = "RECORDED_NOT_AUTHENTICATED"
+    return visual_status, text_status
+
+
 def check(manifest_path):
     import fitz
     from PIL import Image
     manifest = read(manifest_path)
+    if manifest.get("schema_version") == "2.0":
+        from verify_rich_candidate import check_current
+        return check_current(manifest_path, check_media_navigation, check_reports)
     require(manifest.get("schema_version") == "1.0", "Unsupported candidate manifest")
     refs = manifest.get("artifacts")
     require(isinstance(refs, dict) and set(refs) == {"pdf", "lecture", "composition", "render_plan", "profile"}, "Incomplete candidate artifacts")
@@ -201,70 +289,8 @@ def check(manifest_path):
                 if "Inter" in font[3]:
                     require(bool(doc.extract_font(font[0])[3]), "Inter font is not embedded")
         column_pairs = check_columns(doc, lecture, text_rows, profile)
-        visuals = composition.get("visuals")
-        placed = plan.get("visuals")
-        require(isinstance(visuals, list) and isinstance(placed, list), "Missing visual lists")
-        ids = [v["visual_id"] for v in visuals]
-        require(len(set(ids)) == len(ids) and [v["visual_id"] for v in placed] == ids, "Missing/reordered/duplicate visual")
-        for visual, placement in zip(visuals, placed):
-            image_path, source_path = checked(visual["image"]), checked(visual["source"])
-            require(isinstance(visual.get("role"), str) and visual["role"].strip() and isinstance(visual.get("caption"), str) and visual["caption"].strip(), "Missing visual role/caption")
-            anchors = visual.get("text_block_ids")
-            require(isinstance(anchors, list) and anchors and set(anchors) <= set(block_ids), "Unknown visual text anchors")
-            if "frame" in visual:
-                frame_path = checked(visual["frame"])
-                pts = visual.get("pts_seconds")
-                require(type(pts) in {int, float} and math.isfinite(pts) and pts >= 0, "Missing decoded frame time")
-                require(isinstance(visual.get("video_binding"), str) and visual["video_binding"].strip(), "Missing video binding")
-                with Image.open(frame_path) as frame, Image.open(image_path) as image:
-                    box = visual.get("crop_box")
-                    require(isinstance(box, list) and len(box) == 4 and all(type(v) is int for v in box), "Invalid crop box")
-                    require(0 <= box[0] < box[2] <= frame.width and 0 <= box[1] < box[3] <= frame.height, "Crop outside source frame")
-                    crop = frame.convert("RGB").crop(tuple(box))
-                    require(crop.size == image.size and crop.tobytes() == image.convert("RGB").tobytes(), "Crop pixels differ from original frame")
-            page = page_at(placement["page"])
-            rect = rectangle(placement["bbox"], page)
-            pix = fitz.Pixmap(str(image_path))
-            if pix.alpha:
-                pix = fitz.Pixmap(pix, 0)
-            if pix.n != 3:
-                pix = fitz.Pixmap(fitz.csRGB, pix)
-            require(abs(rect.width/rect.height - pix.width/pix.height) <= 0.002, "Visual aspect ratio changed")
-            matches = [i for i in page.get_image_info(hashes=True) if i["digest"] == pix.digest and max(abs(a-b) for a,b in zip(i["bbox"], rect)) < 0.6]
-            require(len(matches) == 1, "Chosen visual is missing/changed in PDF")
-            require(any(r.get("visual_id") == visual["visual_id"] and r["text"] == visual["caption"] for r in text_rows), "Visual caption is not tied to planned PDF text")
-        links = plan.get("links")
-        require(isinstance(links, list), "Missing link plan")
-        actual_links = [(page.number, link, internal_link_target(doc, link)) for page in doc for link in page.get_links()]
-        for item in links:
-            page = page_at(item["page"])
-            target = page_at(item["target_page"])
-            rect = rectangle(item["bbox"], page)
-            require(any(number == page.number and destination == target.number and max(abs(a-b) for a,b in zip(link["from"], rect)) < 0.6 for number,link,destination in actual_links), "Missing/wrong internal link")
-        require(len(actual_links) == len(links) and all(destination is not None for _,_,destination in actual_links), "Unexpected/broken navigation")
-        require(doc.get_toc() == plan.get("bookmarks"), "Bookmarks differ from plan")
-        require(all(type(row[2]) is int and 1 <= row[2] <= len(doc) for row in plan["bookmarks"]), "Bookmark target outside PDF")
-        visual_status = "NOT_RECORDED"
-        if manifest.get("visual_review") is not None:
-            review = read(checked(manifest["visual_review"]))
-            require(review.get("pdf_sha256", "").upper() == refs["pdf"]["sha256"].upper(), "Visual report belongs to a different PDF")
-            pages = review.get("pages")
-            require(isinstance(pages, list) and [p.get("page") for p in pages] == list(range(1,len(doc)+1)), "Incomplete visual report coverage")
-            for row in pages:
-                require(row.get("status") in {"PASS", "REVIEW_REQUIRED"} and isinstance(row.get("observation"), str) and row["observation"].strip(), "Missing page observation")
-                checked(row["raster"])
-            visual_status = "RECORDED_NOT_AUTHENTICATED"
-        text_status = "NOT_RECORDED"
-        if manifest.get("text_review") is not None:
-            review = read(checked(manifest["text_review"]))
-            require(review["artifacts"]["lecture"]["sha256"].upper() == refs["lecture"]["sha256"].upper(), "Text review belongs to another lecture")
-            for decision in review["decisions"]:
-                if decision["execution"] == "pending":
-                    continue
-                for target in decision["targets"]:
-                    value = lecture["title"] if target["layer"] == "title" else by_id[target["id"]]
-                    require(value.count(target["expected"]) == target["count"], "Recorded text decision is not preserved")
-            text_status = "RECORDED_NOT_AUTHENTICATED"
+        visuals, links = check_media_navigation(doc, composition, plan, block_ids, text_rows)
+        visual_status, text_status = check_reports(doc, manifest, refs, lecture, by_id)
         return {"status": "PDF_MECHANICS_VALIDATED", "pdf_sha256": refs["pdf"]["sha256"].upper(), "pages": len(doc),
                 "text_blocks": len(block_ids), "visuals": len(visuals), "links": len(links), "bookmarks": len(plan["bookmarks"]),
                 "column_balance": "VALIDATED", "column_pairs": column_pairs,
