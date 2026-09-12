@@ -1,7 +1,7 @@
 {
   "name": "sf-lecture-materials",
-  "version": "0.2.0",
-  "description": "Полный учебно-методический текст в JSON с LaTeX и смысловыми абзацами; A4 PDF SF Education с проверкой фактического содержания.",
+  "version": "0.3.0",
+  "description": "Учебно-методический текст в JSON с LaTeX, проверка утверждений по доказательным источникам с решениями человека и A4 PDF SF Education.",
   "author": {
     "name": "holopovn00-oss",
     "url": "https://github.com/holopovn00-oss"
@@ -9,8 +9,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "SF Lecture Materials",
-    "shortDescription": "Транскрипт → JSON с LaTeX → PDF SF Education.",
-    "longDescription": "Два самостоятельных навыка: полная учебно-методическая редактура в JSON и A4 PDF. Сохраняются исходные привязки, смысловые абзацы и LaTeX; проверяются текст, формулы, изображения, навигация и допустимый баланс колонок.",
+    "shortDescription": "Транскрипт → JSON; проверка фактов; PDF SF Education.",
+    "longDescription": "Три самостоятельных навыка: учебно-методическая редактура в JSON; отдельная проверка фактов, гипотез и теорий по нормативным, официальным и академическим источникам; A4 PDF. Фактологические замечания содержат доказательства и предложения, исправления выполняются по решению человека. Сохраняются исходные привязки, абзацы и LaTeX.",
     "developerName": "holopovn00-oss",
     "category": "Productivity",
     "capabilities": [],
@@ -23,6 +23,8 @@
   "keywords": [
     "lectures",
     "transcripts",
+    "fact-checking",
+    "academic-evidence",
     "pdf",
     "sf-education",
     "russian"
