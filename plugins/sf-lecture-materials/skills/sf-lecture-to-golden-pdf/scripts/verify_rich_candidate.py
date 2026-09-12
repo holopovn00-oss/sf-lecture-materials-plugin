@@ -1,0 +1,232 @@
+"""Read-only measurements for LectureText 3.0.0 paragraphs and vector LaTeX."""
+from __future__ import annotations
+
+from collections import Counter
+import importlib.util
+import json
+import math
+from pathlib import Path
+
+from lecture_content import VERSION, block_text, formula_items, require
+from latex_math import checked_file, glyphs, placed_matches, validate_asset
+from pdf_flow import allowed_break, best_split, content_key, extent, geometry, text_width
+
+
+def read(path):
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+
+def rect_at(value, page):
+    import fitz
+    require(isinstance(value, list) and len(value) == 4
+            and all(type(v) in {int, float} and math.isfinite(v) for v in value), "Invalid rich-content rectangle")
+    rect = fitz.Rect(value)
+    require(not rect.is_empty and page.rect.contains(rect), "Rich-content rectangle outside page")
+    return rect
+
+
+def check_current(manifest_path, media_check, reports_check):
+    import fitz
+    manifest = read(manifest_path)
+    refs = manifest.get("artifacts")
+    require(isinstance(refs, dict) and set(refs) == {"pdf", "lecture", "composition", "render_plan", "profile"},
+            "Incomplete candidate artifacts")
+    paths = {key: checked_file(value) for key, value in refs.items()}
+    lecture, composition, plan, profile = (read(paths[k]) for k in ("lecture", "composition", "render_plan", "profile"))
+    handoff_path = Path(__file__).resolve().parents[2] / "sf-transcript-to-lecture/scripts/handoff.py"
+    spec = importlib.util.spec_from_file_location("sf_rich_handoff", handoff_path)
+    handoff = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(handoff)
+    handoff.validate_lecture(lecture)
+    require(profile.get("version") == "2.1.0" and profile.get("content_version") == VERSION,
+            "Paragraph/math candidates require the versioned 2.1.0 profile")
+    style = geometry(profile, Path(__file__).resolve().parents[1])
+    blocks = {b["text_block_id"]: b for b in lecture["blocks"]}
+    block_ids = list(blocks)
+    by_topic = {p["text_block_id"]: p["topic_id"] for p in lecture["structure"]["placements"]}
+    run_text, formulas, content_order = {}, {}, []
+    for bid, block in blocks.items():
+        for ci, item in enumerate(block["content"]):
+            content_order.append((bid, ci))
+            if item["type"] == "paragraph":
+                for ri, run in enumerate(item["runs"]):
+                    if run["type"] == "text":
+                        run_text[(bid, ci, ri)] = run["text"]
+        for ci, ri, formula in formula_items(block):
+            formulas[formula["formula_id"]] = (bid, ci, ri, formula)
+    text_rows, math_rows, flow = plan.get("text"), plan.get("math"), plan.get("flow")
+    require(isinstance(text_rows, list) and isinstance(math_rows, list) and isinstance(flow, list) and flow,
+            "Missing text, math or flow plan")
+    require([r.get("formula_id") for r in math_rows] == list(formulas), "Missing, reordered or repeated formula occurrence")
+    indexed, content_groups, line_counts = {}, [], Counter()
+    for row in flow:
+        identifier = row.get("line_id")
+        bid, ci = row.get("block_id"), row.get("content_index")
+        key = (bid, ci)
+        require(isinstance(identifier, str) and identifier and identifier not in indexed, "Repeated or missing flow line ID")
+        require(bid in blocks and type(ci) is int and 0 <= ci < len(blocks[bid]["content"]), "Unknown flow content address")
+        kind = "line" if blocks[bid]["content"][ci]["type"] == "paragraph" else "display_math"
+        require(row.get("kind") == kind and type(row.get("line_index")) is int
+                and row["line_index"] == line_counts[key], "Flow line kind or order differs from source")
+        require(row.get("flow_id") == by_topic[bid] and type(row.get("column")) is int and row["column"] in {1, 2},
+                "Missing or incorrect rich-content column metadata")
+        line_counts[key] += 1
+        if not content_groups or content_groups[-1] != key:
+            content_groups.append(key)
+        indexed[identifier] = {"row": row, "parts": []}
+    require(content_groups == content_order, "Paragraphs/formulas are incomplete, repeated or reordered")
+    for key, count in line_counts.items():
+        if blocks[key[0]]["content"][key[1]]["type"] == "display_math":
+            require(count == 1, "A display formula cannot be split into unrelated flow lines")
+    cursors = {key: 0 for key in run_text}
+    observed_runs = []
+    with fitz.open(paths["pdf"]) as doc:
+        require(not doc.needs_pass and type(plan.get("pages")) is int and plan["pages"] == len(doc) > 0,
+                "Wrong page count or encrypted PDF")
+        def page_at(number):
+            require(type(number) is int and 1 <= number <= len(doc), "Unknown page")
+            return doc[number - 1]
+        page_expected = [Counter() for _ in doc]
+        math_rects = [[] for _ in doc]
+        def match_line(row):
+            require(row.get("line_id") in indexed, "Unplanned body element")
+            item = indexed[row["line_id"]]
+            require(all(row.get(k) == item["row"].get(k) for k in ("page", "column", "flow_id", "block_id", "content_index")),
+                    "Body element differs from its flow line")
+            return item
+        for row in text_rows:
+            page = page_at(row.get("page"))
+            rect = rect_at(row.get("bbox"), page)
+            expected = row.get("text")
+            require(isinstance(expected, str) and expected, "Empty planned text")
+            page_expected[row["page"] - 1].update(c for c in expected if not c.isspace())
+            if "block_id" not in row:
+                require("line_id" not in row, "Unanchored body text")
+                # Heading font boxes can overlap adjacent baselines; select actual
+                # glyph origins as for body/math instead of intersecting font boxes.
+                service_glyphs = glyphs(page, rect)
+                require("".join(c["c"] for c in service_glyphs) == "".join(expected.split()), "PDF service text mismatch")
+                require(all("Inter" in c["font"] for c in service_glyphs), "Non-Inter service text")
+                continue
+            item = match_line(row)
+            key = (row["block_id"], row["content_index"], row.get("run_index"))
+            require(key in run_text, "Unknown text run")
+            start, end = row.get("start"), row.get("end")
+            require(type(start) is int and type(end) is int and start == cursors[key] < end <= len(run_text[key])
+                    and run_text[key][start:end] == expected, "Missing, repeated or changed text-run range")
+            cursors[key] = end
+            if not observed_runs or observed_runs[-1] != key:
+                observed_runs.append(key)
+            origin = row.get("origin")
+            require(isinstance(origin, list) and len(origin) == 2
+                    and all(type(v) in {int, float} and math.isfinite(v) for v in origin), "Missing text origin")
+            actual = glyphs(page, rect)
+            characters = [(i, c) for i, c in enumerate(expected) if not c.isspace()]
+            require(len(actual) == len(characters), "Missing or extra actual body glyph")
+            for char, (offset, value) in zip(actual, characters):
+                require(char["c"] == value and "Inter" in char["font"] and abs(char["size"] - style["size"]) < 0.05,
+                        "Body glyph, font or size differs")
+                require(abs(char["origin"][0] - origin[0] - text_width(expected[:offset], style["size"])) <= 0.2
+                        and abs(char["origin"][1] - origin[1]) <= 0.2, "Body text origin or spacing differs from the actual PDF")
+            width = text_width(expected, style["size"])
+            box = [origin[0], origin[1] - style["ascent"], origin[0] + width, origin[1] + style["descent"]]
+            require(max(abs(a - b) for a, b in zip(rect, box)) <= 0.2, "Body text box differs from measured font metrics")
+            item["parts"].append({"type": "text", "run_index": key[2], "start": start, "end": end,
+                                  "left": origin[0], "baseline": origin[1], "width": width, "text": expected})
+        require(observed_runs == list(run_text) and all(cursors[k] == len(v) for k, v in run_text.items()),
+                "Text runs incomplete or reordered")
+        for row in math_rows:
+            page = page_at(row.get("page"))
+            rect = rect_at(row.get("bbox"), page)
+            item = match_line(row)
+            bid, ci, ri, formula = formulas[row["formula_id"]]
+            require((bid, ci) == (row["block_id"], row["content_index"]), "Math is attached to different content")
+            mode = "display" if ri is None else "inline"
+            receipt, asset = validate_asset(formula["latex"], mode, style["size"], row.get("receipt"))
+            require(not any(rect.intersects(old) for old in math_rects[row["page"] - 1]), "Overlapping math rectangles")
+            page_expected[row["page"] - 1].update(placed_matches(page, rect, asset))
+            math_rects[row["page"] - 1].append(rect)
+            item["parts"].append({"type": "math", "run_index": ri, "formula_id": row["formula_id"],
+                                  "left": rect.x0, "top": rect.y0, "width": rect.width, "height": rect.height,
+                                  "baseline": rect.y0 + receipt["baseline_pt"], "ascent": receipt["baseline_pt"]})
+        width, height = [v * 72 / 25.4 for v in profile["surface"]]
+        for i, page in enumerate(doc):
+            require(abs(page.rect.width - width) < 0.15 and abs(page.rect.height - height) < 0.15, "Wrong page size")
+            actual = glyphs(page)
+            require(Counter(c["c"] for c in actual) == page_expected[i], f"Unplanned or missing glyphs on page {i + 1}")
+            for char in actual:
+                require("Inter" in char["font"] or any(r.contains(fitz.Point(char["origin"])) for r in math_rects[i]),
+                        "Math font used outside a verified formula")
+            # PDF generators may declare an unused base font (for example Helvetica).
+            # Require embedding for every font that actually paints text on this page.
+            used_fonts = {c["font"].split("+")[-1] for c in actual}
+            embedded_fonts = {f[3].split("+")[-1] for f in page.get_fonts(full=True)
+                              if bool(doc.extract_font(f[0])[3])}
+            require(used_fonts <= embedded_fonts, "PDF font is not embedded")
+        measured = []
+        previous_order = None
+        for item in indexed.values():
+            row, parts = item["row"], item["parts"]
+            require(parts, "Empty flow line")
+            key = content_key(row)
+            x = style["x"][row["column"] - 1]
+            if row["kind"] == "display_math":
+                require(len(parts) == 1 and parts[0]["type"] == "math" and parts[0]["run_index"] is None,
+                        "Display formula has missing or extra content")
+                part = parts[0]
+                require(abs(part["left"] - x - (style["width"] - part["width"]) / 2) <= 0.2,
+                        "Display formula is not centered in its actual column")
+                top, ascent, line_height = part["top"], part["ascent"], part["height"]
+            else:
+                require(all(p["run_index"] is not None for p in parts), "Display math inside a text line")
+                parts.sort(key=lambda p: (p["run_index"], p.get("start", 0)))
+                baseline = parts[0]["baseline"]
+                require(all(abs(p["baseline"] - baseline) <= 0.2 for p in parts), "Inline formula baseline differs from text")
+                for part in parts:
+                    require(abs(part["left"] - x) <= 0.2, "Body run order, indent or spacing differs from actual columns")
+                    x += part["width"]
+                require(x <= style["x"][row["column"] - 1] + style["width"] + 0.2, "Body content exceeds column width")
+                ascent = max([style["ascent"]] + [p["ascent"] for p in parts if p["type"] == "math"])
+                descent = max([style["descent"]] + [p["height"] - p["ascent"] for p in parts if p["type"] == "math"])
+                top, line_height = baseline - ascent, max(style["leading"], ascent + descent)
+            require(top >= 0 and top + line_height <= style["bottom"] + 0.2, "Body content exceeds vertical frame")
+            order = (row["page"], row["column"], top)
+            require(previous_order is None or order > previous_order, "Body flow is physically repeated or reordered")
+            previous_order = order
+            measured.append({**row, "top": top, "height": line_height, "ascent": ascent,
+                             "paragraph_lines": line_counts[key]})
+        pairs = {}
+        for unit in measured:
+            pairs.setdefault((unit["page"], unit["flow_id"]), [[], []])[unit["column"] - 1].append(unit)
+        require(len({p for p, _ in pairs}) == len(pairs), "Separate topics must start on separate pages")
+        reports = []
+        for (page, topic), columns in pairs.items():
+            require(columns[0], "Right column cannot precede an empty left column")
+            top = columns[0][0]["top"]
+            for units in columns:
+                y, previous = top, None
+                for unit in units:
+                    if previous is not None and content_key(previous) != content_key(unit):
+                        y += style["gap"]
+                    require(abs(unit["top"] - y) <= 0.2, "Paragraph gap, line spacing or column top differs from actual content")
+                    y += unit["height"]
+                    previous = unit
+            together = columns[0] + columns[1]
+            optimum = best_split(together, style["bottom"] - top, style)
+            require(optimum and optimum[0] == len(columns[0]), "Unbalanced rich columns: a better legal split exists")
+            heights = [extent(c, style["gap"]) for c in columns]
+            reports.append({"page": page, "topic_id": topic, "line_counts": [len(c) for c in columns],
+                            "heights_pt": [round(h, 4) for h in heights], "height_difference_pt": round(abs(heights[0] - heights[1]), 4),
+                            "balance_basis": optimum[2], "measurement": "ACTUAL_GLYPHS_AND_VERIFIED_MATH"})
+        for i in range(1, len(measured)):
+            if (measured[i]["page"], measured[i]["column"]) != (measured[i-1]["page"], measured[i-1]["column"]):
+                require(allowed_break(measured, i, style), "Paragraph widow/orphan or indivisible content was split")
+        visuals, links = media_check(doc, composition, plan, block_ids, text_rows)
+        visual_status, text_status = reports_check(doc, manifest, refs, lecture, {bid: block_text(b) for bid, b in blocks.items()})
+        return {"status": "PDF_MECHANICS_VALIDATED", "pdf_sha256": refs["pdf"]["sha256"].upper(),
+                "pages": len(doc), "text_blocks": len(blocks), "paragraphs": sum(c["type"] == "paragraph" for b in blocks.values() for c in b["content"]),
+                "formulas": len(formulas), "math_placement": "ACTUAL_GLYPHS_AND_STROKES_VALIDATED",
+                "math_compile_evidence": "RECORDED_NOT_AUTHENTICATED", "column_balance": "VALIDATED", "column_pairs": reports,
+                "visuals": len(visuals), "links": len(links), "bookmarks": len(plan["bookmarks"]),
+                "semantic_review": "NOT_EVALUATED_BY_SCRIPT", "visual_review": visual_status, "text_review": text_status,
+                "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT", "golden_gate": "NOT_CERTIFIED_BY_THIS_CHECKER"}

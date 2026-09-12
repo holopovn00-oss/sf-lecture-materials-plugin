@@ -1,4 +1,4 @@
-"""Build/check the SF LectureText 2.0.0 handoff; never edit or assess meaning.
+"""Build JSON-only SF LectureText 3.0.0; read/check legacy 2.0.0 packages.
 
 Python standard library only. No SF Publisher imports or controller operations.
 """
@@ -9,6 +9,10 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from lecture_content import VERSION, block_text, validate_content
 
 
 SOURCE_DEFAULTS = {"substantive": True, "source_uri": None, "start_ms": None,
@@ -117,7 +121,7 @@ def normalize_structure(raw, block_ids):
     return structure
 
 
-def build(source_rows, draft):
+def _build_legacy(source_rows, draft):
     sources = normalize_sources(source_rows)
     require(isinstance(draft, dict) and set(draft) == DRAFT_FIELDS, "Invalid draft fields")
     require(nonempty(draft["folder_id"]) and nonempty(draft["title"]), "Missing folder ID or exact title")
@@ -158,14 +162,122 @@ def build(source_rows, draft):
     return document, sources
 
 
-def check(sources, document):
+def _check_legacy(sources, document):
     require(isinstance(document, dict), "Lecture text must be an object")
     require(DRAFT_FIELDS <= document.keys(), "Incomplete lecture text")
-    rebuilt, _ = build(sources, {key: document[key] for key in DRAFT_FIELDS})
+    rebuilt, _ = _build_legacy(sources, {key: document[key] for key in DRAFT_FIELDS})
     require(rebuilt == document, "Sealed handoff differs from source, structure, or content hash")
     return {"status": "STRUCTURE_VALIDATED", "source_blocks": len(sources),
             "text_blocks": len(document["blocks"]), "content_hash": document["content_hash"],
             "semantic_review": "NOT_EVALUATED_BY_SCRIPT"}
+
+
+def build(source_rows, draft):
+    """Build the current typed format. Editing and substantive review are external."""
+    sources = normalize_sources(source_rows)
+    require(isinstance(draft, dict) and set(draft) == DRAFT_FIELDS | {"schema_version"}
+            and draft["schema_version"] == VERSION, "New drafts require schema_version 3.0.0 and typed content")
+    require(nonempty(draft["folder_id"]) and nonempty(draft["title"]), "Missing folder ID or exact title")
+    blocks = json.loads(json.dumps(draft["blocks"]))
+    block_ids = unique(blocks, "text_block_id")
+    anchored = []
+    for block in blocks:
+        anchors = block.get("source_block_ids")
+        require(isinstance(anchors, list) and anchors and all(nonempty(a) for a in anchors), "Missing source anchors")
+        anchored.extend(anchors)
+    validate_content(blocks)
+    by_source = {row["source_block_id"]: row for row in sources}
+    require(all(a in by_source for a in anchored), "Unknown source anchor")
+    require(len(set(anchored)) == len(anchored), "Duplicate source anchor")
+    ledger = draft["transformation_ledger"]
+    require(isinstance(ledger, list), "Invalid transformation ledger")
+    removed, spans = set(), {}
+    for row in ledger:
+        require(isinstance(row, dict), "Invalid transformation entry")
+        anchor = row.get("source_block_id")
+        require(anchor in by_source and nonempty(row.get("reason")), "Unknown or unjustified transformation")
+        if row.get("disposition") == "removed_nonsemantic":
+            require(set(row) == {"source_block_id", "disposition", "reason"} and anchor not in removed,
+                    "Invalid or repeated whole-block removal")
+            require(by_source[anchor]["substantive"] is False, "Cannot remove substantive content")
+            removed.add(anchor)
+        else:
+            require(row.get("disposition") == "removed_nonsemantic_span"
+                    and set(row) == {"source_block_id", "disposition", "start", "end", "quote", "reason"},
+                    "Invalid partial transformation")
+            start, end, text = row["start"], row["end"], by_source[anchor]["text"]
+            require(type(start) is int and type(end) is int and 0 <= start < end <= len(text)
+                    and text[start:end] == row["quote"] and row["quote"].strip(), "Partial removal differs from source quote")
+            require(anchor in anchored, "A partial removal needs the retained source block")
+            spans.setdefault(anchor, []).append((start, end))
+    require(not set(anchored) & removed, "Source both included and removed")
+    require(anchored == [s["source_block_id"] for s in sources if s["source_block_id"] not in removed],
+            "Missing, repeated, or reordered source blocks")
+    for anchor, ranges in spans.items():
+        ranges.sort()
+        require(all(a[1] <= b[0] for a, b in zip(ranges, ranges[1:])), "Overlapping partial removals")
+        text, previous, kept = by_source[anchor]["text"], 0, []
+        for start, end in ranges:
+            kept.append(text[previous:start])
+            previous = end
+        kept.append(text[previous:])
+        require("".join(kept).strip(), "Partial removals cannot erase the entire source block")
+    structure = normalize_structure(draft["structure"], block_ids)
+    locators = {b["text_block_id"]: [
+        {key: value for key, value in by_source[a].items() if key not in {"text", "substantive"}}
+        for a in b["source_block_ids"]] for b in blocks}
+    for placement in structure["placements"]:
+        group = locators[placement["text_block_id"]]
+        stamp = None
+        if len({a["source_uri"] for a in group}) == 1 and group[0]["start_ms"] is not None and group[-1]["end_ms"] is not None:
+            require(group[-1]["end_ms"] >= group[0]["start_ms"], "Reversed grouped source interval")
+            stamp = time_label(group[0]["start_ms"]) + " — " + time_label(group[-1]["end_ms"])
+        require(placement["timestamp_range"] in (None, stamp), "Grouped timestamp differs from actual source boundaries")
+        placement["timestamp_range"] = stamp
+    document = {"schema_version": VERSION, "folder_id": draft["folder_id"], "title": draft["title"],
+                "editorial_mode": "study_guide", "source_blocks_hash": digest(sources),
+                "blocks": blocks, "transformation_ledger": json.loads(json.dumps(ledger)),
+                "assertions": {"complete_source_accounting": True, "semantic_review_required": True},
+                "structure": structure, "source_locators": locators}
+    document["content_hash"] = digest(document)
+    return document, sources
+
+
+def validate_lecture(document):
+    """Check the current sealed content without claiming to have the transcript."""
+    required = DRAFT_FIELDS | {"schema_version", "editorial_mode", "source_blocks_hash", "assertions",
+                              "source_locators", "content_hash"}
+    require(isinstance(document, dict) and set(document) == required and document["schema_version"] == VERSION,
+            "Invalid current LectureText fields or version")
+    require(document["editorial_mode"] == "study_guide"
+            and document["assertions"] == {"complete_source_accounting": True, "semantic_review_required": True},
+            "Invalid editorial mode or assertions")
+    require(nonempty(document["title"]) and nonempty(document["folder_id"]), "Missing title or folder ID")
+    require(re.fullmatch(r"[A-F0-9]{64}", document["source_blocks_hash"] or ""), "Invalid source blocks hash")
+    require(document["content_hash"] == digest({k: v for k, v in document.items() if k != "content_hash"}),
+            "Lecture content hash differs")
+    identifiers = unique(document["blocks"], "text_block_id")
+    formulas = validate_content(document["blocks"])
+    require(normalize_structure(document["structure"], identifiers) == document["structure"], "Unsealed lecture structure")
+    require(set(document["source_locators"]) == set(identifiers), "Incomplete source locator keys")
+    for block in document["blocks"]:
+        locators = document["source_locators"][block["text_block_id"]]
+        require(isinstance(locators, list) and [a.get("source_block_id") for a in locators] == block["source_block_ids"],
+                "Source locators differ from block anchors")
+    return formulas
+
+
+def check(sources, document):
+    require(isinstance(document, dict), "Lecture text must be an object")
+    if document.get("schema_version") == "2.0.0":
+        return _check_legacy(sources, document)
+    validate_lecture(document)
+    draft = {key: document[key] for key in DRAFT_FIELDS | {"schema_version"}}
+    rebuilt, _ = build(sources, draft)
+    require(rebuilt == document, "Sealed handoff differs from source, structure, or content hash")
+    return {"status": "STRUCTURE_VALIDATED", "schema_version": VERSION, "source_blocks": len(sources),
+            "text_blocks": len(document["blocks"]), "formulas": len(validate_content(document["blocks"])),
+            "content_hash": document["content_hash"], "semantic_review": "NOT_EVALUATED_BY_SCRIPT"}
 
 
 def time_label(milliseconds):
@@ -176,6 +288,8 @@ def time_label(milliseconds):
 
 
 def to_markdown(document):
+    """Legacy verification only. No command exports Markdown in the current version."""
+    require(document.get("schema_version") == "2.0.0", "Markdown projection is only for checking legacy packages")
     sections = {row["section_id"]: row for row in document["structure"]["sections"]}
     topics = {row["topic_id"]: row for row in document["structure"]["topics"]}
     blocks = {row["text_block_id"]: row for row in document["blocks"]}
@@ -214,7 +328,6 @@ def write_package(target, sources, document):
     target.mkdir(parents=True, exist_ok=False)
     for name, value in (("source-blocks.json", sources), ("lecture-text.json", document)):
         (target / name).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    (target / "lecture-text.md").write_text(to_markdown(document), encoding="utf-8")
 
 
 def checked_file(record):
@@ -231,7 +344,8 @@ def checked_file(record):
 def decision_rows(rows, document, source_ids):
     require(isinstance(rows, list), "decisions must be an array")
     indexed = {}
-    blocks = {b["text_block_id"]: b["text"] for b in document["blocks"]}
+    blocks = {b["text_block_id"]: block_text(b) for b in document["blocks"]}
+    formulas = validate_content(document["blocks"]) if document.get("schema_version") == VERSION else {}
     pending = []
     for row in rows:
         require(isinstance(row, dict) and nonempty(row.get("id")), "Invalid decision")
@@ -253,10 +367,13 @@ def decision_rows(rows, document, source_ids):
             require(row["execution"] == "applied", "A correction must be applied")
         for target in targets:
             layer = target.get("layer")
-            require(layer in {"text", "title"}, "Text package decision layer must be text or title")
+            require(layer in {"text", "title", "formula"}, "Decision layer must be text, title or formula")
             if layer == "text":
                 require(target.get("id") in blocks, "Decision target no longer exists")
                 value = blocks[target["id"]]
+            elif layer == "formula":
+                require(target.get("id") in formulas, "Formula decision target no longer exists")
+                value = formulas[target["id"]]["latex"]
             else:
                 value = document["title"]
             require(nonempty(target.get("expected")) and type(target.get("count")) is int and target["count"] >= 1,
@@ -271,14 +388,22 @@ def check_package(review_path, previous_review=None):
     """Read-only checks. Recorded human review/authority are not authenticated."""
     review_path = Path(review_path)
     review = read_json(review_path)
-    require(review.get("schema_version") == "1.0", "Unsupported text review format")
+    version = review.get("schema_version")
+    require(version in {"1.0", "2.0"}, "Unsupported text review format")
     artifacts = review.get("artifacts")
-    require(isinstance(artifacts, dict) and set(artifacts) == {"sources", "lecture", "markdown", "source_manifest", "review"},
+    expected = {"sources", "lecture", "source_manifest"}
+    if version == "1.0":
+        expected |= {"markdown", "review"}
+    require(isinstance(artifacts, dict) and set(artifacts) == expected,
             "Incomplete text package artifacts")
     files = {key: checked_file(value) for key, value in artifacts.items()}
     sources, document = read_json(files["sources"]), read_json(files["lecture"])
     receipt = check(sources, document)
-    require(files["markdown"].read_text(encoding="utf-8") == to_markdown(document), "Markdown differs from generated lecture text")
+    if version == "1.0":
+        require(document["schema_version"] == "2.0.0", "Legacy review cannot certify a current JSON package")
+        require(files["markdown"].read_text(encoding="utf-8") == to_markdown(document), "Markdown differs from generated lecture text")
+    else:
+        require(document["schema_version"] == VERSION, "Current review requires the current JSON package")
     manifest = read_json(files["source_manifest"])
     source_files = manifest.get("files")
     require(isinstance(source_files, list) and bool(source_files), "Source manifest is empty")
@@ -290,6 +415,10 @@ def check_package(review_path, previous_review=None):
         uri = source.get("source_uri")
         require(nonempty(uri) and Path(uri).is_absolute() and Path(uri).resolve() in paths,
                 "Source block is not bound to a file in the source manifest")
+    if version == "2.0":
+        for formula in validate_content(document["blocks"]).values():
+            if "evidence" in formula:
+                require(checked_file(formula["evidence"]) in paths, "Formula evidence is absent from source manifest")
     source_ids = [row["source_block_id"] for row in sources]
     semantic = review.get("semantic_review")
     require(isinstance(semantic, dict) and semantic.get("status") in {"COMPLETED", "INCOMPLETE", "NOT_PERFORMED"},
@@ -300,6 +429,9 @@ def check_package(review_path, previous_review=None):
     require(isinstance(semantic.get("open_issues"), list), "Missing open issue list")
     if semantic["status"] == "COMPLETED":
         require(set(covered) == set(source_ids), "Completed review has incomplete recorded coverage")
+        if version == "2.0":
+            require(isinstance(semantic.get("observations"), list) and semantic["observations"]
+                    and all(nonempty(s) for s in semantic["observations"]), "Completed review needs substantive observations")
     decisions, pending = decision_rows(review.get("decisions"), document, set(source_ids))
     previous_hash = None
     if previous_review is not None:
@@ -318,7 +450,8 @@ def check_package(review_path, previous_review=None):
             if any(new.get(key) != old.get(key) for key in keys):
                 require(new.get("supersedes") == digest(old) and new["basis"] != old.get("basis"),
                         f"Changed decision requires explicit supersedes hash and new basis: {identifier}")
-    removed = {row["source_block_id"] for row in document["transformation_ledger"]}
+    removed = {row["source_block_id"] for row in document["transformation_ledger"] if row["disposition"] == "removed_nonsemantic"}
+    partial_quotes = [row["quote"] for row in document["transformation_ledger"] if row["disposition"] == "removed_nonsemantic_span"]
     count = lambda text: len(re.findall(r"\S+", text))
     return {**receipt, "status": "PACKAGE_VALIDATED", "review_sha256": hashlib.sha256(review_path.read_bytes()).hexdigest().upper(),
             "lecture_sha256": artifacts["lecture"]["sha256"].upper(), "source_files": len(paths),
@@ -329,7 +462,8 @@ def check_package(review_path, previous_review=None):
             "word_counts": {"method": "nonempty whitespace-separated tokens; text fields only",
                             "source": sum(count(s["text"]) for s in sources),
                             "removed_noise": sum(count(s["text"]) for s in sources if s["source_block_id"] in removed),
-                            "lecture": sum(count(b["text"]) for b in document["blocks"])}}
+                            "removed_spans": sum(count(s) for s in partial_quotes),
+                            "lecture": sum(count(block_text(b)) for b in document["blocks"])}}
 
 
 def main():

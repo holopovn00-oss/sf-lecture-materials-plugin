@@ -22,7 +22,7 @@ class BundleTests(unittest.TestCase):
     def test_real_packaged_resources(self):
         receipt = verifier.verify(SCRIPT.parents[1])
         self.assertEqual(receipt["status"], "RESOURCES_VERIFIED")
-        self.assertEqual(receipt["checked_files"], 16)
+        self.assertEqual(receipt["checked_files"], 18)
         self.assertEqual(receipt["candidate_qa"], "NOT_PERFORMED")
 
     def test_changed_resource_is_blocked(self):

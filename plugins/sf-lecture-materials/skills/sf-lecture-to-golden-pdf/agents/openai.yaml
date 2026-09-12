@@ -1,4 +1,4 @@
 interface:
-  display_name: "SF: лекционный текст → Golden Gate PDF"
-  short_description: "A4 PDF по эталону SF с полной постраничной проверкой"
-  default_prompt: "Используй $sf-lecture-to-golden-pdf для создания PDF из указанного готового лекционного текста по Golden Gate SF Education."
+  display_name: "SF: JSON → Golden Gate PDF"
+  short_description: "A4 PDF с абзацами и проверенными формулами LaTeX"
+  default_prompt: "Используй $sf-lecture-to-golden-pdf для создания PDF из готового JSON, сохраняя смысловые абзацы, формулы LaTeX и полное содержание."

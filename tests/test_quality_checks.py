@@ -41,9 +41,11 @@ class PackageChecks(unittest.TestCase):
         self.raw.write_text('Обычно около 15%, если спрос не падает.', encoding='utf-8')
         sources = [{'source_block_id': 's1', 'text': self.raw.read_text(encoding='utf-8'), 'source_uri': str(self.raw)}]
         draft = {'folder_id': 'one', 'title': 'Проверка', 'blocks': [{'text_block_id': 't1', 'text': sources[0]['text'], 'source_block_ids': ['s1'], 'perspective': 'lecturer_direct'}], 'transformation_ledger': [], 'structure': {'sections': [{'section_id': 'sec', 'number': '1', 'title': 'Условия'}], 'topics': [{'topic_id': 'topic', 'section_id': 'sec', 'title': 'Спрос'}], 'placements': [{'text_block_id': 't1', 'section_id': 'sec', 'topic_id': 'topic'}]}}
-        self.lecture, self.sources = HANDOFF.build(sources, draft)
+        self.lecture, self.sources = HANDOFF._build_legacy(sources, draft)
         self.package = self.root / 'package'
         HANDOFF.write_package(self.package, self.sources, self.lecture)
+        # An existing legacy package may contain Markdown; the current writer does not export it.
+        (self.package/'lecture-text.md').write_text(HANDOFF.to_markdown(self.lecture), encoding='utf-8')
         write(self.package/'source-manifest.json', {'files': [{**ref(self.raw), 'order': 1, 'extraction': 'UTF-8 text'}]})
         (self.package/'text-review.md').write_text('Проверено условие спроса.', encoding='utf-8')
         self.review = {'schema_version': '1.0', 'artifacts': {key: ref(self.package/file) for key, file in {'sources': 'source-blocks.json', 'lecture': 'lecture-text.json', 'markdown': 'lecture-text.md', 'source_manifest': 'source-manifest.json', 'review': 'text-review.md'}.items()}, 'semantic_review': {'status': 'COMPLETED', 'covered_source_ids': ['s1'], 'open_issues': []}, 'decisions': [{'id': 'keep-condition', 'decision': 'keep', 'execution': 'verified', 'basis': 'Пользователь: оставить условие.', 'source_block_ids': ['s1'], 'targets': [{'layer': 'text', 'id': 't1', 'expected': 'если спрос не падает', 'count': 1}]}]}
