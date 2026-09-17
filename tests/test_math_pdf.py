@@ -26,11 +26,11 @@ def write(path, value):
     return ref(path)
 
 
-def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_assets=None, service_heading=False):
+def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_assets=None, service_heading=False, continuous=False, indent_extra=0):
     from reportlab.pdfgen.canvas import Canvas
     profile = json.loads((PDF_ROOT / "references/adapters/a4/2.1.0.json").read_text(encoding="utf-8"))
     style = geometry(profile, PDF_ROOT)
-    units = build_units(lecture, "topic", assets, profile, PDF_ROOT)
+    units = build_units(lecture, None if continuous else "topic", assets, profile, PDF_ROOT)
     top = 165.0
     pages = paginate(units, style["bottom"] - top, style)
     plan = {"pages": len(pages), "text": [], "math": [], "flow": [], "visuals": [], "links": [], "bookmarks": []}
@@ -52,7 +52,7 @@ def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_
                 plan["text"].append({"page":number,"text":value,"bbox":[x-.05,heading_top-.15,x+width+.05,heading_top+ascent+descent+.15]})
         for col in range(2):
             layout = {**page, "columns": [page["columns"][0] if col == 0 else [], page["columns"][1] if col == 1 else []]}
-            changed_style = {**style, "gap": style["gap"] + gap_extra}
+            changed_style = {**style, "gap": style["gap"] + gap_extra, "indent": style["indent"] + indent_extra}
             rows = draw_body(canvas, layout, number, top + (right_offset if col else 0), changed_style, assets)
             for name in ("text", "math", "flow"):
                 plan[name].extend(rows[name])
@@ -120,6 +120,26 @@ class MathPdfChecks(unittest.TestCase):
         write(path, manifest)
         with self.assertRaisesRegex(ValueError, "formula occurrence"):
             PDF.check(path)
+
+    def test_wrong_first_line_indent_is_rejected(self):
+        path, _, _ = make_candidate(self.root, self.lecture, self.assets, indent_extra=-2)
+        with self.assertRaisesRegex(ValueError, "indent"):
+            PDF.check(path)
+
+    def test_continuous_topics_with_actual_headings(self):
+        lecture = copy.deepcopy(self.lecture)
+        block = copy.deepcopy(lecture["blocks"][0])
+        block["text_block_id"] = "b2"
+        block["content"] = [block["content"][0]]
+        lecture["blocks"].append(block)
+        lecture["source_locators"]["b2"] = copy.deepcopy(lecture["source_locators"]["b1"])
+        lecture["structure"]["topics"].append({"topic_id":"next", "section_id":"sec", "title":"Следующая подтема"})
+        lecture["structure"]["placements"].append({**lecture["structure"]["placements"][0], "text_block_id":"b2", "topic_id":"next"})
+        lecture["content_hash"] = H.digest({k:v for k,v in lecture.items() if k != "content_hash"})
+        path, _, _ = make_candidate(self.root, lecture, self.assets, continuous=True)
+        result = PDF.check(path)
+        self.assertEqual(result["pages"], 1)
+        self.assertEqual(result["column_pairs"][0]["topic_ids"], ["topic", "next"])
 
     def test_multiline_service_heading_keeps_separate_lines(self):
         path, _, _ = make_candidate(self.root, self.lecture, self.assets, service_heading=True)

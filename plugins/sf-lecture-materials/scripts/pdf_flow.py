@@ -34,6 +34,11 @@ def geometry(profile, skill_root):
     ascent, descent = font_metrics(skill_root, pt["body_size"])
     return {"size": pt["body_size"], "leading": pt["body_leading"], "ascent": ascent, "descent": descent,
             "gap": mm["paragraph_extra_gap"] * MM, "width": mm["column_width"] * MM,
+            "indent": mm.get("paragraph_first_line_indent", 0) * MM,
+            "math_gap": mm.get("display_math_extra_gap", mm["paragraph_extra_gap"]) * MM,
+            "heading_size": pt.get("subtopic_title_size", 11),
+            "heading_leading": pt.get("subtopic_title_leading", 14),
+            "heading_gap": mm["heading_gap"] * MM,
             "x": [mm["content_x"] * MM, mm["column_second_x"] * MM],
             "bottom": mm["content_bottom"] * MM, "height": profile["surface"][1] * MM,
             "short_lines": profile["pagination"]["short_paragraph_max_lines"],
@@ -44,12 +49,35 @@ def content_key(unit):
     return unit["block_id"], unit["content_index"]
 
 
+def topic_heading(title, style):
+    lines = []
+    line = ""
+    for word in title.split():
+        require(text_width(word, style["heading_size"]) <= style["width"], "Topic title word exceeds column")
+        candidate = (line + " " + word).strip()
+        if line and text_width(candidate, style["heading_size"]) > style["width"]:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    if line:
+        lines.append(line)
+    require(lines, "Empty topic title")
+    return {"lines": lines, "height": len(lines) * style["heading_leading"] + 2 * style["heading_gap"]}
+
+
+def boundary_gap(previous, current, gap):
+    """Only display formulas retain a vertical gap; prose uses a first-line indent."""
+    if previous is None or content_key(previous) == content_key(current):
+        return 0.0
+    return max(gap, previous.get("math_gap", 0), current.get("math_gap", 0))
+
+
 def extent(units, gap):
     total = 0.0
     previous = None
     for unit in units:
-        if previous is not None and content_key(previous) != content_key(unit):
-            total += gap
+        total += boundary_gap(previous, unit, gap)
         total += unit["height"]
         previous = unit
     return total
@@ -131,18 +159,23 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
     """Measure line breaks without modifying a character of the JSON text."""
     style = geometry(profile, skill_root)
     by_block = {b["text_block_id"]: b for b in lecture["blocks"]}
+    selected = [p for p in lecture["structure"]["placements"]
+                if topic_id is None or p["topic_id"] in ([topic_id] if isinstance(topic_id, str) else topic_id)]
+    require(len({p["section_id"] for p in selected}) <= 1,
+            "Build a separate continuous flow for each major section")
     units = []
     for placement in lecture["structure"]["placements"]:
-        if placement["topic_id"] != topic_id:
+        if topic_id is not None and placement["topic_id"] not in ([topic_id] if isinstance(topic_id, str) else topic_id):
             continue
         block = by_block[placement["text_block_id"]]
         for ci, content in enumerate(block["content"]):
-            common = {"block_id": block["text_block_id"], "content_index": ci, "flow_id": topic_id}
+            common = {"block_id": block["text_block_id"], "content_index": ci, "flow_id": placement["topic_id"]}
             if content["type"] == "display_math":
                 receipt, _ = validate_asset(content["latex"], "display", style["size"], assets[content["formula_id"]])
                 width, height = receipt["size_pt"]
                 require(width <= style["width"] + 0.05, f"Formula {content['formula_id']} is wider than the column; use an explicit aligned expression")
                 units.append({**common, "kind": "display_math", "formula_id": content["formula_id"],
+                              "math_gap": style["math_gap"],
                               "height": height, "ascent": receipt["baseline_pt"], "width": width,
                               "line_index": 0, "paragraph_lines": 1})
                 continue
@@ -160,7 +193,7 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                         start, end = match.span()
                         while start < end:
                             stop = end
-                            while stop > start + 1 and text_width(run["text"][start:stop], style["size"]) > style["width"]:
+                            while stop > start + 1 and text_width(run["text"][start:stop], style["size"]) > style["width"] - style["indent"]:
                                 stop -= 1
                             value = run["text"][start:stop]
                             atoms.append({"type": "text", "run_index": ri, "start": start, "end": stop,
@@ -168,7 +201,10 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                             start = stop
             lines, line, width = [], [], 0.0
             for atom in atoms:
-                if line and width + atom["width"] > style["width"] + 0.001:
+                available = style["width"] - (style["indent"] if not lines else 0)
+                require(line or atom["width"] <= available + 0.001,
+                        "An inline element exceeds the indented first line; use an explicit display formula")
+                if line and width + atom["width"] > available + 0.001:
                     lines.append(line)
                     line, width = [], 0.0
                 line.append(atom)
@@ -190,6 +226,14 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                               "paragraph_lines": len(lines), "height": max(style["leading"], ascent + descent),
                               "ascent": ascent, "width": sum(p["width"] for p in parts)})
     require(units, "No content for the requested topic")
+    if not isinstance(topic_id, str):
+        titles = {t["topic_id"]: t["title"] for t in lecture["structure"]["topics"]}
+        seen = set()
+        for unit in units:
+            if unit["flow_id"] not in seen:
+                seen.add(unit["flow_id"])
+                unit["heading"] = topic_heading(titles[unit["flow_id"]], style)
+                unit["height"] += unit["heading"]["height"]
     return units
 
 
@@ -201,18 +245,35 @@ def draw_body(canvas, page_layout, page_number, top, style, assets):
     for column, units in enumerate(page_layout["columns"], 1):
         y, previous = top, None
         for unit in units:
-            if previous is not None and content_key(previous) != content_key(unit):
-                y += style["gap"]
+            y += boundary_gap(previous, unit, style["gap"])
             line_id = f"{unit['block_id']}:{unit['content_index']}:{unit['line_index']}"
-            baseline, x = y + unit["ascent"], style["x"][column - 1]
+            heading = unit.get("heading")
+            heading_height = heading["height"] if heading else 0
+            baseline, x = y + heading_height + unit["ascent"], style["x"][column - 1]
+            if heading:
+                from reportlab.pdfbase import pdfmetrics
+                size = style["heading_size"]
+                asc, desc = pdfmetrics.getAscent(FONT_NAME, size), -pdfmetrics.getDescent(FONT_NAME, size)
+                canvas.setFont(FONT_NAME, size)
+                canvas.setFillColorRGB(0, .4, .8)
+                for index, value in enumerate(heading["lines"]):
+                    base = y + style["heading_gap"] + index * style["heading_leading"] + asc
+                    canvas.drawString(x, style["height"] - base, value)
+                    plan["text"].append({"page": page_number, "text": value, "topic_heading_for": line_id,
+                                         "origin": [x, base],
+                                         "bbox": [x-.03, base-asc-.05, x+text_width(value,size)+.03, base+desc+.05]})
+                canvas.setFont(FONT_NAME, style["size"])
+                canvas.setFillColorRGB(.2,.2,.2)
             common = {"page": page_number, "block_id": unit["block_id"], "content_index": unit["content_index"],
                       "column": column, "flow_id": unit["flow_id"], "line_id": line_id}
-            plan["flow"].append({**common, "kind": unit["kind"], "line_index": unit["line_index"]})
+            plan["flow"].append({**common, "kind": unit["kind"], "line_index": unit["line_index"], "topic_heading": bool(heading)})
             if unit["kind"] == "display_math":
                 left = x + (style["width"] - unit["width"]) / 2
                 plan["math"].append({**common, "formula_id": unit["formula_id"], "receipt": assets[unit["formula_id"]],
-                                     "bbox": [left, y, left + unit["width"], y + unit["height"]]})
+                                     "bbox": [left, y + heading_height, left + unit["width"], y + unit["height"]]})
             else:
+                if unit["line_index"] == 0:
+                    x += style["indent"]
                 for part in unit["parts"]:
                     if part["type"] == "text":
                         canvas.drawString(x, style["height"] - baseline, part["text"])

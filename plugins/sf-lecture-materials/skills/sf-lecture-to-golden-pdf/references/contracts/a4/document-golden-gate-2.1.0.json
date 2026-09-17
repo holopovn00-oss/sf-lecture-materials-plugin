@@ -4,6 +4,14 @@
   "source_golden_sha256": "0188F5614446EEBAD7ED5A1CCD54448B8B27E3E99B8242B85BAC1BD0501DA949",
   "rights_status": "CONFIRMED",
   "requirements": "A33-A45 and M01-M20 retained where compatible; approved study-guide, paragraph and LaTeX requirements 2026-09-12",
+  "cover_title": {
+    "approved_on": "2026-09-17",
+    "lesson_ordinal": "omit-including-source-title-file-or-folder-prefix",
+    "semantic_title": "preserve-including-meaningful-numbers",
+    "ambiguous_number": "request-clarification",
+    "source_provenance": "preserve-original-title-and-ordinal",
+    "scope": "cover-only-no-file-renaming-or-other-numbering-changes"
+  },
   "visual_flow": "visual-first-full-width",
   "topic_visual_policy": {
     "source_order": "preserved",
@@ -14,13 +22,23 @@
   "short_topic_layout": "two-column",
   "long_topic_layout": "two-column",
   "section_boundary_policy": "never-mix-sections",
+  "section_visual_separation": {
+    "major_chapters": "hierarchical-headings-and-controlled-spacing",
+    "main_semantic_blocks": "visible-heading-and-controlled-spacing",
+    "blank_subtopic_divider_pages": "not-required"
+  },
   "topic_character_limit": "unbounded",
   "pagination": {
     "measurement": "Inter-glyph-width-and-compiled-LaTeX-boxes",
     "same_topic_flow": "unbounded-across-pages",
     "fragment_boundary": "typed-paragraph-runs-and-indivisible-math",
     "reconstruction": "ordered-text-run-ranges-and-exact-LaTeX-occurrences",
-    "new_topic_and_visual": "new-page",
+    "new_topic_and_visual": "continue-in-available-space-unless-keep-or-fit-requires-break",
+    "subtopic_sequence": "source-order-with-related-paragraphs-no-forced-page-break",
+    "heading_keep": "with-at-least-two-body-lines-or-first-indivisible-content-element",
+    "print_compactness": "reduce-avoidable-whitespace-and-breaks-without-content-or-readability-loss",
+    "unfilled_space": "check-next-block-fit-and-record-required-break-reason",
+    "continuous_subtopics_implementation": "MEASURED_SECTION_FLOW_WITH_TOPIC_HEADINGS",
     "heading_continuation": "repeat-section-only-no-topic-title",
     "continuation_content_top": {
       "basis": "max-visible-section-label-and-logo-bottom",
@@ -34,11 +52,23 @@
     "content_width_mm": 174,
     "column_width_mm": 84,
     "column_gap_mm": 6,
-    "reading_order": "flow-left-right-then-next-flow",
+    "reading_order": "within-content-zone-left-column-then-right-follow-source-order",
     "bottom_mm": 272,
-    "paragraph_extra_gap_mm": 4,
-    "flow_boundary": "semantic-topic-and-selected-visual-not-source-ASR-boundaries",
-    "balance": "minimum-height-difference-among-legal-breaks"
+    "paragraph_extra_gap_mm": 0,
+    "display_math_extra_gap_mm": 4,
+    "paragraph_start": {
+      "approved_on": "2026-09-17",
+      "style": "uniform-first-line-indent",
+      "first_line_indent_mm": 5,
+      "indent_size_status": "USER_CONFIRMED",
+      "blank_separator_lines": "forbidden",
+      "source_text_padding": "forbidden-use-layout-not-tabs-or-spaces",
+      "continuation_indent_mm": 0,
+      "scope": "body-text-paragraphs-only",
+      "implementation_status": "PROFILE_RENDERER_AND_CHECKER_ALIGNED"
+    },
+    "flow_boundary": "physical-content-zone-not-each-topic-id-preserve-semantic-links",
+    "balance": "fill-continuous-section-flow-first-then-balance-final-legal-pair"
   },
   "rail": {
     "x_mm": 14,

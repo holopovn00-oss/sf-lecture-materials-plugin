@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lecture_content import VERSION, block_text, formula_items, require
 from latex_math import checked_file, glyphs, placed_matches, validate_asset
-from pdf_flow import allowed_break, best_split, content_key, extent, geometry, text_width
+from pdf_flow import allowed_break, best_split, boundary_gap, content_key, extent, geometry, text_width, topic_heading
 
 
 def read(path):
@@ -44,6 +44,8 @@ def check_current(manifest_path, media_check, reports_check):
     blocks = {b["text_block_id"]: b for b in lecture["blocks"]}
     block_ids = list(blocks)
     by_topic = {p["text_block_id"]: p["topic_id"] for p in lecture["structure"]["placements"]}
+    topic_titles = {t["topic_id"]: t["title"] for t in lecture["structure"]["topics"]}
+    heading_rows = {}
     run_text, formulas, content_order = {}, {}, []
     for bid, block in blocks.items():
         for ci, item in enumerate(block["content"]):
@@ -107,6 +109,17 @@ def check_current(manifest_path, media_check, reports_check):
                 service_glyphs = glyphs(page, rect)
                 require("".join(c["c"] for c in service_glyphs) == "".join(expected.split()), "PDF service text mismatch")
                 require(all("Inter" in c["font"] for c in service_glyphs), "Non-Inter service text")
+                if "topic_heading_for" in row:
+                    anchor = row["topic_heading_for"]
+                    require(anchor in indexed and indexed[anchor]["row"].get("topic_heading") is True,
+                            "Unanchored topic heading")
+                    origin = row.get("origin")
+                    require(isinstance(origin, list) and len(origin) == 2, "Missing topic heading origin")
+                    for char, (offset, _) in zip(service_glyphs, [(i,c) for i,c in enumerate(expected) if not c.isspace()]):
+                        require(abs(char["size"] - style["heading_size"]) < .05
+                                and abs(char["origin"][0] - origin[0] - text_width(expected[:offset], style["heading_size"])) < .2
+                                and abs(char["origin"][1] - origin[1]) < .2, "Topic heading glyph geometry differs")
+                    heading_rows.setdefault(anchor, []).append(row)
                 continue
             item = match_line(row)
             key = (row["block_id"], row["content_index"], row.get("run_index"))
@@ -164,6 +177,7 @@ def check_current(manifest_path, media_check, reports_check):
                               if bool(doc.extract_font(f[0])[3])}
             require(used_fonts <= embedded_fonts, "PDF font is not embedded")
         measured = []
+        seen_topics = set()
         previous_order = None
         for item in indexed.values():
             row, parts = item["row"], item["parts"]
@@ -178,6 +192,8 @@ def check_current(manifest_path, media_check, reports_check):
                         "Display formula is not centered in its actual column")
                 top, ascent, line_height = part["top"], part["ascent"], part["height"]
             else:
+                if row["line_index"] == 0:
+                    x += style["indent"]
                 require(all(p["run_index"] is not None for p in parts), "Display math inside a text line")
                 parts.sort(key=lambda p: (p["run_index"], p.get("start", 0)))
                 baseline = parts[0]["baseline"]
@@ -189,25 +205,47 @@ def check_current(manifest_path, media_check, reports_check):
                 ascent = max([style["ascent"]] + [p["ascent"] for p in parts if p["type"] == "math"])
                 descent = max([style["descent"]] + [p["height"] - p["ascent"] for p in parts if p["type"] == "math"])
                 top, line_height = baseline - ascent, max(style["leading"], ascent + descent)
+            if row.get("topic_heading"):
+                require(row["flow_id"] not in seen_topics, "Topic heading repeated inside its flow")
+                heading = topic_heading(topic_titles[row["flow_id"]], style)
+                headers = heading_rows.get(row["line_id"], [])
+                require([h["text"] for h in headers] == heading["lines"], "Missing or changed topic title")
+                top -= heading["height"]
+                line_height += heading["height"]
+                from reportlab.pdfbase import pdfmetrics
+                from pdf_flow import FONT_NAME
+                for j, h in enumerate(headers):
+                    require(h["page"] == row["page"] and abs(h["origin"][0] - style["x"][row["column"]-1]) < .2
+                            and abs(h["origin"][1] - (top + style["heading_gap"] + j*style["heading_leading"]
+                                + pdfmetrics.getAscent(FONT_NAME, style["heading_size"]))) < .2,
+                            "Topic heading placement differs")
+            seen_topics.add(row["flow_id"])
             require(top >= 0 and top + line_height <= style["bottom"] + 0.2, "Body content exceeds vertical frame")
             order = (row["page"], row["column"], top)
             require(previous_order is None or order > previous_order, "Body flow is physically repeated or reordered")
             previous_order = order
             measured.append({**row, "top": top, "height": line_height, "ascent": ascent,
+                             "math_gap": style["math_gap"] if row["kind"] == "display_math" else 0,
                              "paragraph_lines": line_counts[key]})
         pairs = {}
         for unit in measured:
-            pairs.setdefault((unit["page"], unit["flow_id"]), [[], []])[unit["column"] - 1].append(unit)
-        require(len({p for p, _ in pairs}) == len(pairs), "Separate topics must start on separate pages")
+            pairs.setdefault(unit["page"], [[], []])[unit["column"] - 1].append(unit)
+        section_by_topic = {t["topic_id"]: t["section_id"] for t in lecture["structure"]["topics"]}
         reports = []
-        for (page, topic), columns in pairs.items():
+        for page, columns in pairs.items():
+            topics = list(dict.fromkeys(u["flow_id"] for c in columns for u in c))
+            require(len({section_by_topic[t] for t in topics}) == 1, "Major sections must not share a page")
+            if profile["pagination"].get("new_topic_starts_new_page", True):
+                require(len(topics) == 1, "Legacy profile requires separate topic pages")
+            if len(topics) > 1:
+                require(all(any(u.get("topic_heading") for u in measured if u["flow_id"] == t) for t in topics),
+                        "Continuous topics require visible headings")
             require(columns[0], "Right column cannot precede an empty left column")
             top = columns[0][0]["top"]
             for units in columns:
                 y, previous = top, None
                 for unit in units:
-                    if previous is not None and content_key(previous) != content_key(unit):
-                        y += style["gap"]
+                    y += boundary_gap(previous, unit, style["gap"])
                     require(abs(unit["top"] - y) <= 0.2, "Paragraph gap, line spacing or column top differs from actual content")
                     y += unit["height"]
                     previous = unit
@@ -215,7 +253,7 @@ def check_current(manifest_path, media_check, reports_check):
             optimum = best_split(together, style["bottom"] - top, style)
             require(optimum and optimum[0] == len(columns[0]), "Unbalanced rich columns: a better legal split exists")
             heights = [extent(c, style["gap"]) for c in columns]
-            reports.append({"page": page, "topic_id": topic, "line_counts": [len(c) for c in columns],
+            reports.append({"page": page, "topic_ids": topics, "line_counts": [len(c) for c in columns],
                             "heights_pt": [round(h, 4) for h in heights], "height_difference_pt": round(abs(heights[0] - heights[1]), 4),
                             "balance_basis": optimum[2], "measurement": "ACTUAL_GLYPHS_AND_VERIFIED_MATH"})
         for i in range(1, len(measured)):
