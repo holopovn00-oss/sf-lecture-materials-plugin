@@ -293,11 +293,12 @@ def check_current(manifest_path, media_check, reports_check):
             if (measured[i]["page"], measured[i]["column"]) != (measured[i-1]["page"], measured[i-1]["column"]):
                 require(allowed_break(measured, i, style), "Paragraph widow/orphan or indivisible content was split")
         visuals, links = media_check(doc, composition, plan, block_ids, text_rows)
-        visual_status, text_status = reports_check(doc, manifest, refs, lecture, {bid: block_text(b) for bid, b in blocks.items()})
+        visual_status, text_status, workflow_status = reports_check(doc, manifest, refs, lecture, {bid: block_text(b) for bid, b in blocks.items()})
         return {"status": "PDF_MECHANICS_VALIDATED", "pdf_sha256": refs["pdf"]["sha256"].upper(),
                 "pages": len(doc), "text_blocks": len(blocks), "paragraphs": sum(c["type"] == "paragraph" for b in blocks.values() for c in b["content"]),
                 "formulas": len(formulas), "math_placement": "ACTUAL_GLYPHS_AND_STROKES_VALIDATED",
                 "math_compile_evidence": "RECORDED_NOT_AUTHENTICATED", "column_balance": "VALIDATED", "column_pairs": reports,
                 "visuals": len(visuals), "links": len(links), "bookmarks": len(plan["bookmarks"]),
                 "semantic_review": "NOT_EVALUATED_BY_SCRIPT", "visual_review": visual_status, "text_review": text_status,
-                "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT", "golden_gate": "NOT_CERTIFIED_BY_THIS_CHECKER"}
+                "workflow": workflow_status, "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT",
+                "golden_gate": "NOT_CERTIFIED_BY_THIS_CHECKER"}

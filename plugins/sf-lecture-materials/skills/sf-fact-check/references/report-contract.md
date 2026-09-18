@@ -64,4 +64,10 @@ Review: `{decision, comment, basis, execution, application}`.
 
 `python scripts/verify_fact_check.py --report <абсолютный путь>`
 
-На stdout — JSON, код 0 при `FACT_CHECK_RECORD_VALIDATED`, 1 при `BLOCKED`. При необходимости сохрани stdout в отдельный check.json. Проверка не пишет вход/отчёт и не подключается к сети. В результате отдельно видны unresolved findings, pending decisions, непроверенные утверждения, записанный охват и пересчитанные выражения. Unresolved findings не включает выполненную поправку или явное допущение без предложения; оставленная ошибка остаётся замечанием. Status counts всегда описывает исходный вход данного отчёта. Истина, независимость исследований и полнота инвентаризации остаются `NOT_AUTHENTICATED_BY_SCRIPT`, полномочия человека — `RECORDED_NOT_AUTHENTICATED`.
+На stdout — JSON, код 0 при `FACT_CHECK_RECORD_VALIDATED`, 1 при `BLOCKED`. При необходимости сохрани stdout в отдельный check.json. Проверка не пишет вход/отчёт и не подключается к сети. В результате отдельно видны unresolved findings, pending decisions, actionable findings (claims с proposal), retained findings, непроверенные утверждения, записанный охват и пересчитанные выражения. Unresolved findings не включает выполненную поправку или явное допущение без предложения; оставленная ошибка остаётся замечанием. Status counts всегда описывает исходный вход данного отчёта. Истина, независимость исследований и полнота инвентаризации остаются `NOT_AUTHENTICATED_BY_SCRIPT`, полномочия человека — `RECORDED_NOT_AUTHENTICATED`.
+
+## Предъявление и handoff полного цикла
+
+JSON содержит все claims. В чат попадают только action-карточки по [правилам предъявления](human-review.md): реальная ошибка или оговорка, которая меняет учебный смысл и требует решения. Отсутствие action-карточки не превращает coverage в независимую гарантию.
+
+Для полного цикла `fact-check.json` связывается с исходной и выбранной новой LectureText записью через [full-cycle handoff 1.0.0](../../sf-lecture-materials/references/full-cycle-handoff-1.0.0.md). Handoff не меняет этот schema_version и не заменяет фактчек. Он допускает PDF только при закрытых решениях, примененных `correct`, записанных `keep` и полном охвате либо явном принятии ограничения.

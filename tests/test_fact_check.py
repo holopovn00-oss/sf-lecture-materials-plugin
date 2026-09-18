@@ -71,6 +71,7 @@ class FactCheckTests(unittest.TestCase):
         receipt = json.loads(result.stdout)
         self.assertEqual(receipt["recalculated"], {"E1": "3"})
         self.assertEqual(receipt["pending_decisions"], ["FC-001"])
+        self.assertEqual(receipt["actionable_findings"], ["FC-001"])
         self.assertEqual(receipt["truth_and_source_quality"], "NOT_AUTHENTICATED_BY_SCRIPT")
         self.assertEqual(before, {p: p.read_bytes() for p in before})
 

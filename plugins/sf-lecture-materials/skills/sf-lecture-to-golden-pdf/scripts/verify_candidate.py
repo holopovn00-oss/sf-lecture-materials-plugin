@@ -122,7 +122,34 @@ def check_media_navigation(doc, composition, plan, block_ids, text_rows):
     return visuals, links
 
 
+def check_workflow(manifest, refs):
+    workflow = manifest.get("workflow")
+    require(isinstance(workflow, dict) and set(workflow) == {"mode", "full_cycle_handoff"},
+            "Missing or invalid candidate workflow")
+    mode, handoff_ref = workflow["mode"], workflow["full_cycle_handoff"]
+    require(mode in {"direct_skill", "full_cycle"}, "Unknown candidate workflow mode")
+    if mode == "direct_skill":
+        require(handoff_ref is None, "Direct-skill PDF cannot claim a full-cycle handoff")
+        return "DIRECT_SKILL_NO_FACT_CHECK_GATE"
+    require(isinstance(handoff_ref, dict) and set(handoff_ref) == {"kind", "path", "sha256"} and
+            handoff_ref["kind"] == "full_cycle_handoff", "Missing full-cycle handoff reference")
+    handoff_path = checked(handoff_ref)
+    import importlib.util
+    script = Path(__file__).resolve().parents[3] / "scripts/verify_full_cycle_handoff.py"
+    spec = importlib.util.spec_from_file_location("sf_full_cycle_handoff", script)
+    handoff = importlib.util.module_from_spec(spec)
+    require(spec and spec.loader, "Cannot load full-cycle handoff validator")
+    spec.loader.exec_module(handoff)
+    receipt = handoff.check(handoff_path)
+    require(receipt["status"] == "FULL_CYCLE_FACT_CHECK_GATE_VALIDATED",
+            "Full-cycle fact-check gate did not validate")
+    require(receipt["selected_lecture_sha256"].upper() == refs["lecture"]["sha256"].upper(),
+            "Full-cycle handoff selects another lecture")
+    return receipt["status"]
+
+
 def check_reports(doc, manifest, refs, lecture, by_id):
+    workflow_status = check_workflow(manifest, refs)
     visual_status = "NOT_RECORDED"
     if manifest.get("visual_review") is not None:
         review = read(checked(manifest["visual_review"]))
@@ -148,12 +175,12 @@ def check_reports(doc, manifest, refs, lecture, by_id):
                     value = lecture["title"] if target["layer"] == "title" else by_id[target["id"]]
                 require(value.count(target["expected"]) == target["count"], "Recorded text decision is not preserved")
         text_status = "RECORDED_NOT_AUTHENTICATED"
-    return visual_status, text_status
+    return visual_status, text_status, workflow_status
 
 
 def check(manifest_path):
     manifest = read(manifest_path)
-    require(manifest.get("schema_version") == "2.0", "Unsupported candidate manifest: expected 2.0")
+    require(manifest.get("schema_version") == "2.1", "Unsupported candidate manifest: expected 2.1")
     from verify_rich_candidate import check_current
     return check_current(manifest_path, check_media_navigation, check_reports)
 

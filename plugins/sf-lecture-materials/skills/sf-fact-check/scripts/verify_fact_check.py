@@ -262,10 +262,17 @@ def validate(report, previous=None):
                    (c["assessment"]["status"] == "context_dependent" and c["assessment"]["proposal"] is not None))]
     pending = [i for i, c in claims.items() if c["review"]["execution"] == "pending" and
                (c["assessment"]["proposal"] is not None or c["review"]["decision"] == "recheck")]
+    actionable = [i for i, c in claims.items() if c["assessment"]["proposal"] is not None]
+    retained = [i for i, c in claims.items() if c["review"]["execution"] == "kept" and
+                c["assessment"]["proposal"] is not None]
+    resolved = [i for i, c in claims.items() if c["review"]["execution"] in {"applied", "kept"} and
+                c["assessment"]["proposal"] is not None]
     return {"status": "FACT_CHECK_RECORD_VALIDATED", "schema_version": VERSION,
             "input_sha256": report["input"]["sha256"], "claims": len(claims), "status_counts": dict(counts),
             "recorded_coverage": scope["coverage"], "unresolved_findings": unresolved,
-            "pending_decisions": pending, "not_checked": [i for i, c in claims.items() if c["assessment"]["status"] == "not_checked"],
+            "pending_decisions": pending, "actionable_findings": actionable, "retained_findings": retained,
+            "resolved_actionable_findings": resolved,
+            "not_checked": [i for i, c in claims.items() if c["assessment"]["status"] == "not_checked"],
             "recalculated": calculations, "history": "CHECKED" if previous is not None else "NOT_REQUESTED",
             "truth_and_source_quality": "NOT_AUTHENTICATED_BY_SCRIPT",
             "claim_inventory_completeness": "NOT_AUTHENTICATED_BY_SCRIPT",
