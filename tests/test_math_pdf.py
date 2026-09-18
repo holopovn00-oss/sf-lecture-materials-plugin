@@ -19,6 +19,7 @@ PDF = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(PDF)
 TECTONIC = os.environ.get("SF_TECTONIC") or shutil.which("tectonic")
 CACHE = os.environ.get("SF_TECTONIC_CACHE")
+ALLOW_RELEASE_DOWNLOADS = os.environ.get("SF_RELEASE_VALIDATION") == "1"
 
 
 class ReleaseGateChecks(unittest.TestCase):
@@ -106,7 +107,7 @@ class MathPdfChecks(unittest.TestCase):
             for _, ri, formula in formula_items(block):
                 target = cls.cache_root / formula["formula_id"]
                 compile_math(formula["latex"], "display" if ri is None else "inline", 9.5, target,
-                             tectonic=TECTONIC, cache_dir=CACHE)
+                             tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
                 cls.assets[formula["formula_id"]] = ref(target / "math.json")
 
     def setUp(self):
