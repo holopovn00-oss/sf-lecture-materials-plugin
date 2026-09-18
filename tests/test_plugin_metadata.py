@@ -31,6 +31,18 @@ class PluginMetadataChecks(unittest.TestCase):
         self.assertEqual(manifest["version"], "0.1.0")
         self.assertEqual(manifest["skills"], "./skills/")
 
+    def test_general_metadata_matches_the_two_mode_workflow(self):
+        manifest = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+        description = manifest["description"].lower()
+        self.assertIn("полный цикл", description)
+        self.assertIn("прямые навыки", description)
+        self.assertNotIn("предложи подходящие варианты", manifest["interface"]["defaultPrompt"].lower())
+        general = (ROOT / "skills/sf-lecture-materials/agents/openai.yaml").read_text(encoding="utf-8")
+        fact_check = (ROOT / "skills/sf-fact-check/agents/openai.yaml").read_text(encoding="utf-8")
+        self.assertIn("полный цикл", general.lower())
+        self.assertIn("action-карточ", fact_check.lower())
+        self.assertIn("не переходи к pdf автоматически", fact_check.lower())
+
     def test_marketplace_entry_resolves_to_the_only_manifest(self):
         marketplace = json.loads((REPO / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         entries = marketplace["plugins"]
