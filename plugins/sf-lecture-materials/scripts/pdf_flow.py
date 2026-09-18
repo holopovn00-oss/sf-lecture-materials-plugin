@@ -241,13 +241,12 @@ def best_split(units, capacity, style):
     if choices:
         _, _, cut, heights = min(choices)
         return cut, heights, "BEST_LEGAL_SPLIT"
-    if (extent(units, style["gap"]) <= capacity + 0.05 and valid_fragments(units, style)
-            and not any(allowed_break(units, k, style) for k in range(1, len(units)))):
+    if extent(units, style["gap"]) <= capacity + 0.05 and valid_fragments(units, style):
         return len(units), [extent(units, style["gap"]), 0.0], "INDIVISIBLE_CONTENT"
     return None
 
 
-def paginate(units, capacity, style):
+def paginate(units, capacity, style, *, first_page_only=False):
     require(capacity > 0 and units, "No space or content for body flow")
     result, cursor = [], 0
     while cursor < len(units):
@@ -268,6 +267,8 @@ def paginate(units, capacity, style):
         end, (cut, heights, reason) = found
         result.append({"columns": [tail[:cut], tail[cut:end]], "heights": heights, "balance_reason": reason})
         cursor += end
+        if first_page_only:
+            break
     return result
 
 

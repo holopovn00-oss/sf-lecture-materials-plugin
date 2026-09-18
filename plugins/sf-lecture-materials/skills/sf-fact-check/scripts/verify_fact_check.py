@@ -6,6 +6,7 @@ import ast
 from collections import Counter
 from datetime import date
 from fractions import Fraction
+from decimal import Decimal, localcontext
 import hashlib
 import json
 from pathlib import Path
@@ -94,7 +95,7 @@ def arithmetic(expression):
     require(len(list(ast.walk(tree))) <= 100, "Arithmetic expression is too complex")
 
     def bounded(value):
-        require(max(value.numerator.bit_length(), value.denominator.bit_length()) <= 4096,
+        require(max(value.numerator.bit_length(), value.denominator.bit_length()) <= 16384,
                 "Arithmetic result exceeds the supported size")
         return value
 
@@ -118,9 +119,9 @@ def arithmetic(expression):
         elif isinstance(node.op, ast.Div):
             result = left / right
         elif isinstance(node.op, ast.Pow):
-            require(right.denominator == 1 and abs(right.numerator) <= 100, "Unsupported exponent")
+            require(right.denominator == 1 and abs(right.numerator) <= 1000, "Unsupported exponent; use numeric mode for fractional powers")
             exponent = right.numerator
-            require(max(left.numerator.bit_length(), left.denominator.bit_length()) * abs(exponent) <= 4096,
+            require(max(left.numerator.bit_length(), left.denominator.bit_length()) * abs(exponent) <= 16384,
                     "Power exceeds the supported size")
             result = left ** exponent
         else:
@@ -128,6 +129,58 @@ def arithmetic(expression):
         return bounded(result)
 
     return visit(tree.body)
+
+
+def decimal_arithmetic(expression, precision=50):
+    """Bounded decimal evaluator for financial powers, sqrt, ln/log and exp."""
+    require(nonempty(expression) and len(expression) <= 1000, "Invalid arithmetic expression")
+    require(type(precision) is int and 28 <= precision <= 100, "Precision must be 28..100")
+    expression = expression.strip()
+    tree = ast.parse(expression, mode="eval")
+    require(len(list(ast.walk(tree))) <= 100, "Arithmetic expression is too complex")
+
+    def bounded(value):
+        require(value.is_finite() and (not value or abs(value.adjusted()) <= 1000), "Numeric result exceeds bounds")
+        return value
+
+    def visit(node):
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            literal = ast.get_source_segment(expression, node)
+            require(re.fullmatch(r"(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d{1,3})?", literal), "Invalid numeric literal")
+            return bounded(Decimal(literal))
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = visit(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.Call):
+            require(isinstance(node.func, ast.Name) and node.func.id in {"sqrt", "ln", "log", "exp"}
+                    and len(node.args) == 1 and not node.keywords, "Unsupported numeric function")
+            value = visit(node.args[0])
+            if node.func.id == "exp":
+                require(abs(value) <= 1000, "Exponential argument exceeds bounds")
+                return bounded(value.exp())
+            return bounded(value.sqrt() if node.func.id == "sqrt" else value.ln())
+        require(isinstance(node, ast.BinOp), "Only bounded numeric arithmetic is allowed")
+        left, right = visit(node.left), visit(node.right)
+        if isinstance(node.op, ast.Add): result = left + right
+        elif isinstance(node.op, ast.Sub): result = left - right
+        elif isinstance(node.op, ast.Mult): result = left * right
+        elif isinstance(node.op, ast.Div): result = left / right
+        elif isinstance(node.op, ast.Pow):
+            require(abs(right) <= 1000, "Exponent exceeds bounds")
+            result = left ** right
+        else: raise ValueError("Unsupported arithmetic operation")
+        return bounded(result)
+
+    with localcontext() as context:
+        context.prec = precision
+        context.Emax, context.Emin = 2000, -2000
+        return visit(tree.body)
+
+
+def decision_required(claim):
+    assessment = claim["assessment"]
+    # Legacy reports remain conservative; new reports classify proposals explicitly.
+    return assessment.get("decision_required", assessment["proposal"] is not None)
 
 
 def evidence_rows(rows):
@@ -138,11 +191,21 @@ def evidence_rows(rows):
                 "Missing or repeated evidence ID")
         kind = row.get("kind")
         if kind == "calculation":
-            keys(row, "id kind expression result method applicability limitations")
-            require(all(nonempty(row[k]) for k in row), "Empty calculation field")
-            actual = arithmetic(row["expression"])
-            require(len(row["result"]) <= 1000 and actual == arithmetic(row["result"]),
-                    "Calculation result is incorrect")
+            keys(row, "id kind expression result method applicability limitations" + (" numeric" if "numeric" in row else ""))
+            require(all(nonempty(row[k]) for k in row if k != "numeric"), "Empty calculation field")
+            require(len(row["result"]) <= 10000, "Calculation result is too long")
+            if "numeric" in row:
+                numeric = row["numeric"]
+                keys(numeric, "precision absolute_tolerance relative_tolerance")
+                absolute, relative = (Decimal(numeric[k]) for k in ("absolute_tolerance", "relative_tolerance"))
+                require(all(v.is_finite() and 0 <= v <= Decimal("0.000001") for v in (absolute, relative)),
+                        "Numeric tolerance must be finite and at most 1e-6")
+                actual = decimal_arithmetic(row["expression"], numeric["precision"])
+                expected = decimal_arithmetic(row["result"], numeric["precision"])
+                require(abs(actual-expected) <= max(absolute, relative*abs(actual)), "Calculation result is incorrect")
+            else:
+                actual = arithmetic(row["expression"])
+                require(actual == arithmetic(row["result"]), "Calculation result is incorrect")
             calculations[row["id"]] = str(actual)
         else:
             require(kind in SOURCE_KINDS, "Source category is not an allowed evidence basis")
@@ -215,7 +278,8 @@ def validate(report, previous=None):
         require(row["kind"] in CLAIM_KINDS and nonempty(row["context"]), "Invalid claim type/context")
         check_anchor(row["anchor"], units)
         assessment = row["assessment"]
-        keys(assessment, "status rationale evidence_ids proposal")
+        keys(assessment, "status rationale evidence_ids proposal" + (" decision_required" if "decision_required" in assessment else ""))
+        require(type(decision_required(row)) is bool, "decision_required must be boolean")
         status, ids = assessment["status"], assessment["evidence_ids"]
         require(status in STATUSES and nonempty(assessment["rationale"]), "Missing status or reasoning")
         require(strings(ids) and len(set(ids)) == len(ids) and set(ids) <= set(evidence), "Unknown/repeated evidence reference")
@@ -227,6 +291,8 @@ def validate(report, previous=None):
         proposal = assessment["proposal"]
         if status in {"error", "outdated"}:
             require(proposal is not None, "Discrepancy needs a proposed correction or clarification")
+            require(decision_required(row), "Confirmed errors require a human decision")
+        require(not decision_required(row) or proposal is not None, "A required decision needs a proposal")
         if proposal is not None:
             keys(proposal, "kind text")
             require(proposal["kind"] in {"correction", "qualification", "question"} and nonempty(proposal["text"]),
@@ -261,8 +327,8 @@ def validate(report, previous=None):
                   (c["assessment"]["status"] in {"error", "outdated", "disputed", "unverified"} or
                    (c["assessment"]["status"] == "context_dependent" and c["assessment"]["proposal"] is not None))]
     pending = [i for i, c in claims.items() if c["review"]["execution"] == "pending" and
-               (c["assessment"]["proposal"] is not None or c["review"]["decision"] == "recheck")]
-    actionable = [i for i, c in claims.items() if c["assessment"]["proposal"] is not None]
+               (decision_required(c) or c["review"]["decision"] == "recheck")]
+    actionable = [i for i, c in claims.items() if decision_required(c)]
     retained = [i for i, c in claims.items() if c["review"]["execution"] == "kept" and
                 c["assessment"]["proposal"] is not None]
     resolved = [i for i, c in claims.items() if c["review"]["execution"] in {"applied", "kept"} and

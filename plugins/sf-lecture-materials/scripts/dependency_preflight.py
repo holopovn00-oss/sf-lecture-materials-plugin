@@ -27,7 +27,7 @@ import zipfile
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-RUNTIME_REQUIREMENTS_PATH = PLUGIN_ROOT.parent.parent / "runtime-requirements.json"
+RUNTIME_REQUIREMENTS_PATH = PLUGIN_ROOT / "runtime-requirements.json"
 MIN_TECTONIC_VERSION = (0, 15, 0)
 MANAGED_TECTONIC_VERSION = "0.17.0"
 MAX_TECTONIC_DOWNLOAD_BYTES = 100 * 1024 * 1024
@@ -186,7 +186,7 @@ def pip_is_available():
         process = subprocess.run(
             [sys.executable, "-m", "pip", "--version"], stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", timeout=10, check=False)
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return process.returncode == 0
 
@@ -258,13 +258,8 @@ def resolve_tectonic(explicit=None):
 
 
 def _smoke_source():
-    return r"""\documentclass{article}
-\usepackage{amsmath,amssymb}
-\pagestyle{empty}
-\begin{document}
-\(x^2+\frac{1}{2}\)
-\end{document}
-"""
+    from latex_math import tex_source
+    return tex_source(r"\mathrm{EAR}=\left(1+\frac{r}{m}\right)^m-1+\mathbb{R}", "display", 9.5)
 
 
 def run_tex_smoke(resolution, cache_dir, *, allow_downloads=False):
@@ -282,7 +277,7 @@ def run_tex_smoke(resolution, cache_dir, *, allow_downloads=False):
         try:
             process = subprocess.run(command, cwd=work, env=environment, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                     timeout=45, check=False)
+                                     timeout=300 if allow_downloads else 45, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
             return {"status": "FAILED", "diagnostic": str(error)}
         if process.returncode == 0 and (work / "smoke.pdf").is_file():
@@ -307,11 +302,11 @@ def action(identifier, summary, *, installable=True):
     }
 
 
-def inspect_dependencies(explicit_tectonic=None):
+def inspect_dependencies(explicit_tectonic=None, *, needs_math=True):
     requirements = read_runtime_requirements()
     python_runtime = check_python_runtime(requirements)
     packages = check_python_packages(requirements)
-    resolution = resolve_tectonic(explicit_tectonic)
+    resolution = resolve_tectonic(explicit_tectonic) if needs_math else None
     cache = check_tex_cache(resolution) if resolution else {
         "status": "NOT_CHECKED",
         "path": str(default_tectonic_cache_dir()),
@@ -323,7 +318,9 @@ def inspect_dependencies(explicit_tectonic=None):
     missing_packages = [item["distribution"] for item in packages if item["status"] != "READY"]
     if missing_packages:
         actions.append(action("INSTALL_PYTHON_REQUIREMENTS", "Install: " + ", ".join(missing_packages)))
-    if resolution is None:
+    if not needs_math:
+        cache["status"] = "NOT_REQUIRED"
+    elif resolution is None:
         artifact = artifact_for_current_platform()
         if artifact:
             actions.append(action(
@@ -345,11 +342,11 @@ def inspect_dependencies(explicit_tectonic=None):
             "interpreter": str(Path(sys.executable).resolve()),
             "runtime": python_runtime,
             "pip_available": pip_is_available(),
-            "requirements_file": str((PLUGIN_ROOT.parent.parent / requirements["python"]["requirements_file"]).resolve()),
+            "requirements_file": str((PLUGIN_ROOT / requirements["python"]["requirements_file"]).resolve()),
             "packages": packages,
         },
         "tectonic": resolution or {
-            "status": "MISSING",
+            "status": "MISSING" if needs_math else "NOT_REQUIRED",
             "minimum_version": ".".join(map(str, MIN_TECTONIC_VERSION)),
         },
         "tex_cache": cache,
@@ -457,11 +454,19 @@ def run_checked(command, *, description):
         raise PreflightError(f"{description} failed: {output}")
 
 
+def managed_python_path():
+    environment = runtime_root() / "python" / "venv"
+    return environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
 def install_python_requirements(requirements_path):
-    if not pip_is_available():
-        run_checked([sys.executable, "-m", "ensurepip", "--upgrade"], description="pip bootstrap")
-    run_checked([sys.executable, "-m", "pip", "install", "--requirement", str(requirements_path)],
+    interpreter = managed_python_path()
+    if not interpreter.is_file():
+        run_checked([sys.executable, "-m", "venv", str(interpreter.parent.parent)],
+                    description="Isolated Python environment creation")
+    run_checked([str(interpreter), "-m", "pip", "install", "--requirement", str(requirements_path)],
                 description="Python dependency installation")
+    return interpreter
 
 
 def prepare_tex_cache(resolution):
@@ -472,13 +477,16 @@ def prepare_tex_cache(resolution):
         raise PreflightError("Tectonic package-cache preparation failed: " + result.get("diagnostic", "unknown error"))
 
 
-def install_missing_dependencies(explicit_tectonic=None):
-    report = inspect_dependencies(explicit_tectonic)
+def install_missing_dependencies(explicit_tectonic=None, *, needs_math=True):
+    report = inspect_dependencies(explicit_tectonic, needs_math=needs_math)
     if report["status"] == "BLOCKED":
         raise PreflightError("; ".join(report["blockers"]))
     requirements_path = Path(report["python"]["requirements_file"])
     if any(item["status"] != "READY" for item in report["python"]["packages"]):
-        install_python_requirements(requirements_path)
+        interpreter = install_python_requirements(requirements_path)
+        return run_managed_preflight(interpreter, explicit_tectonic, needs_math, install=True)
+    if not needs_math:
+        return report
     resolution = report["tectonic"] if report["tectonic"].get("path") else install_tectonic()
     refreshed = inspect_dependencies(explicit_tectonic)
     if refreshed["tex_cache"]["status"] != "READY":
@@ -486,8 +494,23 @@ def install_missing_dependencies(explicit_tectonic=None):
     return inspect_dependencies(explicit_tectonic)
 
 
+def run_managed_preflight(interpreter, explicit_tectonic, needs_math, *, install=False):
+    command = [str(interpreter), "-X", "utf8", str(Path(__file__).resolve()), "--json", "--current-python"]
+    if explicit_tectonic:
+        command.extend(["--tectonic", str(explicit_tectonic)])
+    if not needs_math:
+        command.append("--no-math")
+    if install:
+        command.extend(["--install", "--approve-install"])
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=900)
+    if result.returncode not in (0, 1):
+        raise PreflightError(result.stderr[-1000:])
+    return json.loads(result.stdout)
+
+
 def print_report(report):
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    # Machine-readable JSON must survive legacy Windows console encodings.
+    print(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True))
 
 
 def main(argv=None):
@@ -496,14 +519,21 @@ def main(argv=None):
     parser.add_argument("--install", action="store_true", help="Prepare only missing dependencies")
     parser.add_argument("--approve-install", action="store_true", help="Required explicit approval for --install")
     parser.add_argument("--json", action="store_true", help="Retained for machine-readable invocations; output is always JSON")
+    parser.add_argument("--no-math", action="store_true", help="PDF input contains no formulas; TeX is not required")
+    parser.add_argument("--current-python", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     try:
         if args.install and not args.approve_install:
             raise PreflightError("Installation requires --approve-install after the user explicitly approves it")
-        report = install_missing_dependencies(args.tectonic) if args.install else inspect_dependencies(args.tectonic)
+        interpreter = managed_python_path()
+        if not args.current_python and interpreter.is_file() and interpreter.resolve() != Path(sys.executable).resolve():
+            report = run_managed_preflight(interpreter, args.tectonic, not args.no_math, install=args.install)
+        else:
+            operation = install_missing_dependencies if args.install else inspect_dependencies
+            report = operation(args.tectonic, needs_math=not args.no_math)
         print_report(report)
         return 0 if report["status"] == "READY" else 1
-    except (PreflightError, OSError, KeyError, TypeError, ValueError) as error:
+    except (PreflightError, OSError, KeyError, TypeError, ValueError, subprocess.TimeoutExpired) as error:
         print_report({"schema_version": "0.1.0", "status": "BLOCKED", "reason": str(error)})
         return 1
 

@@ -1,240 +1,143 @@
-"""Validate actual multi-zone Golden Gate mechanics against a candidate PDF.
-
-This read-only checker complements verify_candidate.py. It verifies the concrete
-full-width topic divider and its two symmetric columns using an addressable
-golden-zone-plan.json. It does not certify semantics, visual judgment, or user
-acceptance.
-"""
+"""Multi-zone geometry integrated with the complete candidate/content/workflow check."""
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import math
 from pathlib import Path
-import sys
 
-MM_TO_PT = 72 / 25.4
-TOLERANCE_PT = 0.7
+from verify_candidate import checked, read, require, rectangle
 
-
-def require(condition, message):
-    if not condition:
-        raise ValueError(message)
+TOLERANCE = 0.7
 
 
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+def load_zones(manifest, refs, plan):
+    reference = manifest.get("zone_plan")
+    if reference is None:
+        return [], {}
+    data = read(checked(reference))
+    require(data.get("schema_version") == "1.0", "Expected golden-zone plan 1.0")
+    for key in ("pdf", "profile", "render_plan"):
+        linked = data["artifacts"][key]
+        require(checked(linked).resolve() == checked(refs[key]).resolve()
+                and linked["sha256"].upper() == refs[key]["sha256"].upper(), f"Zone plan uses another {key}")
+    zones = data.get("zones")
+    require(isinstance(zones, list) and zones, "Missing Golden zones")
+    flow = {row["line_id"]: row for row in plan["flow"]}
+    indexed, identifiers = {}, set()
+    order = []
+    for index, zone in enumerate(zones):
+        identifier = zone.get("zone_id")
+        require(isinstance(identifier, str) and identifier and identifier not in identifiers, "Duplicate or missing zone ID")
+        identifiers.add(identifier)
+        require(type(zone.get("page")) is int and 1 <= zone["page"] <= plan["pages"], "Invalid zone page")
+        columns = zone.get("columns")
+        require(isinstance(columns, list) and len(columns) == 2 and [c.get("column") for c in columns] == [1, 2],
+                "Zone must have two ordered column frames")
+        require(columns[0].get("line_ids"), "Zone needs left-column content")
+        for column in columns:
+            lines = column.get("line_ids")
+            require(isinstance(lines, list), "Invalid zone line IDs")
+            for line in lines:
+                require(line in flow and line not in indexed, "Missing or duplicate zone flow line")
+                row = flow[line]
+                require(row["page"] == zone["page"] and row["column"] == column["column"]
+                        and row["flow_id"] == zone["topic_id"], "Zone line has another page, column or topic")
+                indexed[line] = index
+                order.append(line)
+    require(order == [r["line_id"] for r in plan["flow"]], "Zone plan must cover every body line in source order")
+    return zones, indexed
 
 
-def as_rect(value, label):
-    require(isinstance(value, list) and len(value) == 4 and
-            all(type(item) in {int, float} and math.isfinite(item) for item in value),
-            f"Invalid {label} rectangle")
-    x0, y0, x1, y1 = value
-    require(x1 > x0 and y1 > y0, f"Empty {label} rectangle")
-    return (float(x0), float(y0), float(x1), float(y1))
-
-
-def checked(reference, label):
-    require(isinstance(reference, dict), f"Missing {label} reference")
-    path = Path(reference.get("path", ""))
-    expected = reference.get("sha256")
-    require(path.is_absolute() and path.is_file(), f"Missing absolute {label}: {path}")
-    require(isinstance(expected, str) and len(expected) == 64, f"Invalid {label} SHA-256")
-    actual = hashlib.sha256(path.read_bytes()).hexdigest().upper()
-    require(actual == expected.upper(), f"Changed {label}: {path}")
-    return path
-
-
-def contains(outer, inner, tolerance=TOLERANCE_PT):
-    return (outer[0] - tolerance <= inner[0] and outer[1] - tolerance <= inner[1] and
-            inner[2] <= outer[2] + tolerance and inner[3] <= outer[3] + tolerance)
-
-
-def overlaps(left, right, tolerance=TOLERANCE_PT):
-    return not (left[2] < right[0] - tolerance or right[2] < left[0] - tolerance or
-                left[3] < right[1] - tolerance or right[3] < left[1] - tolerance)
-
-
-def close(actual, expected, label):
-    require(abs(actual - expected) <= TOLERANCE_PT,
-            f"{label}: expected {expected:.2f}pt, got {actual:.2f}pt")
-
-
-def drawing_exists(page, target):
-    for drawing in page.get_drawings():
-        rect = drawing.get("rect")
-        if rect is not None and overlaps((rect.x0, rect.y0, rect.x1, rect.y1), target):
-            return True
-    return False
-
-
-def text_exists(page, text, target):
-    matches = page.search_for(text)
-    require(matches, f"Divider/body text is absent from PDF: {text!r}")
-    require(any(overlaps((box.x0, box.y0, box.x1, box.y1), target) for box in matches),
-            f"PDF text is outside recorded rectangle: {text!r}")
-
-
-def ref_matches(candidate, zones, name):
-    candidate_ref = candidate[name]
-    zone_ref = zones[name]
-    candidate_path = checked(candidate_ref, name)
-    zone_path = checked(zone_ref, name)
-    require(candidate_path.resolve() == zone_path.resolve(), f"Zone plan uses another {name}")
-    require(candidate_ref["sha256"].upper() == zone_ref["sha256"].upper(),
-            f"Zone plan uses another {name} hash")
-    return candidate_path
+def check_geometry(doc, zones, measured, style, lecture):
+    import fitz
+    titles = {t["topic_id"]: t["title"] for t in lecture["structure"]["topics"]}
+    previous_bottom = {}
+    seen = set()
+    previous_page = 0
+    by_line = {r["line_id"]: r for r in measured}
+    for zone in zones:
+        number, topic = zone["page"], zone["topic_id"]
+        require(number >= previous_page and topic in titles, "Reordered zone or unknown topic")
+        previous_page = number
+        page = doc[number-1]
+        boxes = [rectangle(c["bbox"], page) for c in zone["columns"]]
+        for i, box in enumerate(boxes):
+            require(abs(box.x0-style["x"][i]) <= TOLERANCE, f"Column {i+1} x coordinate differs")
+            require(abs(box.width-style["width"]) <= TOLERANCE, f"Column {i+1} width differs")
+            require(box.y1 <= style["bottom"]+TOLERANCE, "Column enters navigation area")
+        require(abs(boxes[0].y0-boxes[1].y0) <= TOLERANCE
+                and abs(boxes[0].y1-boxes[1].y1) <= TOLERANCE, "Column frames must be symmetric")
+        divider = zone.get("divider")
+        zone_top = boxes[0].y0
+        if topic not in seen:
+            require(isinstance(divider, dict), "First topic zone requires a divider")
+            require(divider.get("title_text") == titles[topic], "Divider title differs from lecture")
+        else:
+            require(divider is None, "Continuation must not repeat the topic divider")
+        seen.add(topic)
+        if divider is not None:
+            title = rectangle(divider["title_bbox"], page)
+            rule = rectangle(divider["rule_bbox"], page)
+            require(title.x0 >= style["x"][0]-TOLERANCE and title.x1 <= style["x"][1]+style["width"]+TOLERANCE,
+                    "Divider title outside content width")
+            region = fitz.Rect(title.x0-TOLERANCE, title.y0-TOLERANCE, title.x1+TOLERANCE, title.y1+TOLERANCE)
+            actual = "".join(page.get_text("text", clip=region).split())
+            require(actual == "".join(divider["title_text"].split()), "Divider title is missing from PDF")
+            require(rule.x0 >= title.x1-TOLERANCE, "Rule overlaps title")
+            drawings = page.get_drawings()
+            require(any(d.get("rect") and abs(d["rect"].x0-rule.x0) < TOLERANCE
+                        and abs(d["rect"].x1-rule.x1) < TOLERANCE
+                        and abs((d["rect"].y0+d["rect"].y1)/2-(rule.y0+rule.y1)/2) < TOLERANCE
+                        for d in drawings), "Divider rule is absent")
+            lower = max(title.y1, rule.y1)
+            zone_top = min(title.y0, rule.y0)
+            if divider.get("time_pill_bbox") is not None:
+                pill = rectangle(divider["time_pill_bbox"], page)
+                require(abs(pill.x1-style["x"][1]-style["width"]) <= TOLERANCE
+                        and rule.x1 <= pill.x0+TOLERANCE, "Invalid time pill placement")
+                require(any(d.get("rect") and max(abs(a-b) for a,b in zip(d["rect"],pill)) <= TOLERANCE
+                            for d in drawings), "Time pill is absent")
+                time_text = divider.get("time_text")
+                require(isinstance(time_text, str) and time_text.strip(), "Missing time text")
+                require("".join(page.get_text("text", clip=pill).split()) == "".join(time_text.split()),
+                        "Time pill text differs")
+                lower = max(lower,pill.y1)
+                zone_top = min(zone_top,pill.y0)
+            require(boxes[0].y0 >= lower-TOLERANCE, "Body overlaps divider")
+        require(zone_top >= previous_bottom.get(number, 0)-TOLERANCE, "Overlapping or reordered zones")
+        actual_bottom = boxes[0].y0
+        for box, column in zip(boxes, zone["columns"]):
+            for identifier in column["line_ids"]:
+                row = by_line[identifier]
+                require(row["top"] >= box.y0-TOLERANCE and row["top"]+row["height"] <= box.y1+TOLERANCE,
+                        "Body outside zone frame")
+                actual_bottom = max(actual_bottom, row["top"]+row["height"])
+        previous_bottom[number] = actual_bottom
+    return {"status": "GOLDEN_ZONE_MECHANICS_VALIDATED", "zones": len(zones),
+            "covered_body_lines": len(by_line)}
 
 
 def check(candidate_manifest_path, zone_plan_path):
-    import fitz
-
-    candidate = read_json(candidate_manifest_path)
-    require(candidate.get("schema_version") == "2.1", "Expected candidate manifest 2.1")
-    artifacts = candidate.get("artifacts")
-    require(isinstance(artifacts, dict), "Missing candidate artifacts")
-
-    zones = read_json(zone_plan_path)
-    require(zones.get("schema_version") == "1.0", "Expected golden-zone plan 1.0")
-    zone_artifacts = zones.get("artifacts")
-    require(isinstance(zone_artifacts, dict), "Missing golden-zone artifacts")
-
-    pdf_path = ref_matches(artifacts, zone_artifacts, "pdf")
-    profile_path = ref_matches(artifacts, zone_artifacts, "profile")
-    plan_path = ref_matches(artifacts, zone_artifacts, "render_plan")
-    profile = read_json(profile_path)
-    render_plan = read_json(plan_path)
-
-    require(profile.get("layout_revision") == "2026-09-18", "Unsupported layout revision")
-    layout = profile.get("layout_profile", {}).get("mm", {})
-    required = ("content_x", "content_right", "column_width", "column_gap", "topic_title_top")
-    require(all(type(layout.get(name)) in {int, float} for name in required), "Incomplete A4 profile")
-    content_x = layout["content_x"] * MM_TO_PT
-    content_right = layout["content_right"] * MM_TO_PT
-    column_width = layout["column_width"] * MM_TO_PT
-    column_gap = layout["column_gap"] * MM_TO_PT
-
-    text_rows = render_plan.get("text")
-    flow_rows = render_plan.get("flow")
-    require(isinstance(text_rows, list) and isinstance(flow_rows, list), "Incomplete render plan")
-    text_by_line = {}
-    for row in text_rows:
-        line_id = row.get("line_id")
-        if line_id is not None:
-            require(isinstance(line_id, str) and line_id not in text_by_line, "Duplicate text line_id")
-            text_by_line[line_id] = row
-    flow_by_line = {}
-    for row in flow_rows:
-        line_id = row.get("line_id")
-        require(isinstance(line_id, str) and line_id and line_id not in flow_by_line, "Invalid/duplicate flow line_id")
-        flow_by_line[line_id] = row
-
-    entries = zones.get("zones")
-    require(isinstance(entries, list) and entries, "Golden-zone plan has no zones")
-    zone_ids = set()
-    covered_lines = set()
-    zone_topics = set()
-
-    with fitz.open(pdf_path) as document:
-        require(not document.needs_pass and len(document) > 0, "Unreadable candidate PDF")
-        for zone in entries:
-            require(isinstance(zone, dict), "Invalid zone")
-            zone_id = zone.get("zone_id")
-            page_number = zone.get("page")
-            topic_id = zone.get("topic_id")
-            require(isinstance(zone_id, str) and zone_id and zone_id not in zone_ids, "Invalid/duplicate zone_id")
-            require(type(page_number) is int and 1 <= page_number <= len(document), "Zone page is outside PDF")
-            require(isinstance(topic_id, str) and topic_id, "Zone has no topic_id")
-            zone_ids.add(zone_id)
-            zone_topics.add(topic_id)
-            page = document[page_number - 1]
-
-            divider = zone.get("divider")
-            require(isinstance(divider, dict), "Zone has no divider")
-            title = divider.get("title_text")
-            title_box = as_rect(divider.get("title_bbox"), "divider title")
-            rule_box = as_rect(divider.get("rule_bbox"), "divider rule")
-            pill_value = divider.get("time_pill_bbox")
-            pill_box = None if pill_value is None else as_rect(pill_value, "time pill")
-            page_box = (0.0, 0.0, float(page.rect.width), float(page.rect.height))
-            require(contains(page_box, title_box) and contains(page_box, rule_box), "Divider is outside page")
-            require(title_box[0] >= content_x - TOLERANCE_PT and title_box[2] <= content_right + TOLERANCE_PT,
-                    "Divider title is outside content width")
-            require(rule_box[0] >= title_box[2] - TOLERANCE_PT and rule_box[2] <= content_right + TOLERANCE_PT,
-                    "Divider rule does not follow title within content width")
-            text_exists(page, title, title_box)
-            require(drawing_exists(page, rule_box), "Divider rule is absent from PDF")
-            if pill_box is not None:
-                require(contains(page_box, pill_box), "Time pill is outside page")
-                close(pill_box[2], content_right, "Time pill right edge")
-                require(rule_box[2] <= pill_box[0] + TOLERANCE_PT, "Divider rule overlaps time pill")
-                require(drawing_exists(page, pill_box), "Time pill drawing is absent from PDF")
-
-            columns = zone.get("columns")
-            require(isinstance(columns, list) and len(columns) == 2, "Zone must have exactly two columns")
-            require([item.get("column") for item in columns] == [1, 2], "Columns must be ordered 1 then 2")
-            balance = zone.get("balance")
-            require(isinstance(balance, dict) and balance.get("status") in {"BEST_LEGAL_SPLIT", "INDIVISIBLE_CONTENT"} and
-                    isinstance(balance.get("reason"), str) and balance["reason"].strip(), "Missing balance decision")
-
-            assigned = []
-            for index, column in enumerate(columns):
-                box = as_rect(column.get("bbox"), f"column {index + 1}")
-                expected_x = content_x + index * (column_width + column_gap)
-                close(box[0], expected_x, f"Column {index + 1} x coordinate")
-                close(box[2] - box[0], column_width, f"Column {index + 1} width")
-                require(box[1] > title_box[3] - TOLERANCE_PT, "Column starts before its divider")
-                line_ids = column.get("line_ids")
-                require(isinstance(line_ids, list) and line_ids and len(set(line_ids)) == len(line_ids),
-                        f"Column {index + 1} has invalid line IDs")
-                assigned.extend(line_ids)
-                for line_id in line_ids:
-                    require(line_id not in covered_lines, "Body line is assigned to more than one zone")
-                    flow = flow_by_line.get(line_id)
-                    text_row = text_by_line.get(line_id)
-                    require(flow is not None and text_row is not None, "Zone line is missing from render plan")
-                    require(flow.get("page") == page_number and text_row.get("page") == page_number,
-                            "Zone line belongs to another page")
-                    require(flow.get("column") == index + 1, "Zone line is assigned to another column")
-                    require(flow.get("flow_id") == topic_id, "Zone line belongs to another topic")
-                    text_box = as_rect(text_row.get("bbox"), f"body line {line_id}")
-                    require(contains(box, text_box), "Body line is outside recorded column")
-                    body_text = text_row.get("text")
-                    require(isinstance(body_text, str) and body_text.strip(), "Body line has no text")
-                    text_exists(page, body_text, text_box)
-                    covered_lines.add(line_id)
-            require(len(assigned) >= 2, "Divider is not kept with two body lines")
-            if balance["status"] == "BEST_LEGAL_SPLIT":
-                require(all(column.get("line_ids") for column in columns),
-                        "Best legal split must occupy both columns")
-
-    expected_lines = {
-        line_id for line_id, row in flow_by_line.items()
-        if row.get("flow_id") in zone_topics
-    }
-    require(covered_lines == expected_lines,
-            "Golden-zone plan does not cover exactly the body flow for its declared topics")
-    return {
-        "status": "GOLDEN_ZONE_MECHANICS_VALIDATED",
-        "zones": len(entries),
-        "covered_body_lines": len(covered_lines),
-        "semantic_review": "NOT_EVALUATED_BY_SCRIPT",
-        "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT",
-    }
+    from verify_candidate import check as check_candidate
+    candidate = read(candidate_manifest_path)
+    reference = candidate.get("zone_plan")
+    require(reference is not None and checked(reference).resolve() == Path(zone_plan_path).resolve(),
+            "Candidate manifest must reference this zone plan")
+    result = check_candidate(candidate_manifest_path)
+    require(result.get("zones"), "Candidate has no validated zones")
+    return {**result, "candidate_status": result["status"], "status": "GOLDEN_ZONE_MECHANICS_VALIDATED"}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--candidate-manifest", type=Path, required=True)
-    parser.add_argument("--zone-plan", type=Path, required=True)
+    parser.add_argument("--candidate-manifest", required=True)
+    parser.add_argument("--zone-plan", required=True)
     args = parser.parse_args()
     try:
-        print(json.dumps(check(args.candidate_manifest, args.zone_plan), ensure_ascii=True, indent=2))
+        print(json.dumps(check(args.candidate_manifest, args.zone_plan), ensure_ascii=False, indent=2))
         return 0
     except (OSError, ValueError, TypeError, KeyError, ImportError, RuntimeError) as error:
-        print(json.dumps({"status": "BLOCKED", "reason": str(error)}, ensure_ascii=True))
+        print(json.dumps({"status": "BLOCKED", "reason": str(error)}))
         return 1
 
 

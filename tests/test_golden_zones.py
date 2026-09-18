@@ -1,6 +1,5 @@
-"""Regression checks for the addressable multi-zone Golden Gate checker."""
+"""Actual PDFs from the shipped renderer, including multiple zones and continuations."""
 import copy
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -8,130 +7,109 @@ import tempfile
 import unittest
 
 import fitz
-from reportlab.pdfgen.canvas import Canvas
-
-from test_json_content import ROOT
-
-PDF_ROOT = ROOT / "skills/sf-lecture-to-golden-pdf"
-spec = importlib.util.spec_from_file_location("golden_zones", PDF_ROOT / "scripts/verify_golden_zones.py")
-ZONES = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(ZONES)
-MM_TO_PT = 72 / 25.4
-
-
-def ref(path):
-    return {"path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper()}
+from test_json_content import ROOT, H, fixture, ref
+from render_golden import render
+from verify_candidate import check
+from verify_golden_zones import check as check_zones
 
 
 class GoldenZoneChecks(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        self.profile = PDF_ROOT / "references/adapters/a4/2.1.0.json"
-        self.candidate, self.zone_plan = self.make_candidate()
+        self.root=Path(self.tmp.name)
+        sources,draft=fixture(self.root/"source.json")
+        draft["blocks"][0]["content"]=[{"type":"paragraph","runs":[{"type":"text","text":
+            "Рабочий документ содержит последовательность действий и объяснение результата. "*3}]} for _ in range(2)]
+        self.lecture,_=H.build(sources,draft)
+        block=copy.deepcopy(self.lecture["blocks"][0])
+        block["text_block_id"]="b2"
+        self.lecture["blocks"].append(block)
+        self.lecture["source_locators"]["b2"]=copy.deepcopy(self.lecture["source_locators"]["b1"])
+        self.lecture["structure"]["topics"].append({"topic_id":"second","section_id":"sec","title":"Следующая тема"})
+        self.lecture["structure"]["placements"].append({**self.lecture["structure"]["placements"][0],
+                                                        "text_block_id":"b2","topic_id":"second"})
 
-    def make_candidate(self):
-        profile = json.loads(self.profile.read_text(encoding="utf-8"))
-        mm = profile["layout_profile"]["mm"]
-        width, height = [value * MM_TO_PT for value in profile["surface"]]
-        x0 = mm["content_x"] * MM_TO_PT
-        right = mm["content_right"] * MM_TO_PT
-        column_width = mm["column_width"] * MM_TO_PT
-        gap = mm["column_gap"] * MM_TO_PT
-        pdf = self.root / "candidate.pdf"
-        canvas = Canvas(str(pdf), pagesize=(width, height))
-        canvas.setFont("Helvetica", 11)
-        title_y_top = 24 * MM_TO_PT
-        canvas.drawString(x0, height - title_y_top - 11, "Topic title")
-        rule_y_top = 29 * MM_TO_PT
-        rule_left = 58 * MM_TO_PT
-        pill_left = 166 * MM_TO_PT
-        canvas.setLineWidth(0.75)
-        canvas.line(rule_left, height - rule_y_top, pill_left, height - rule_y_top)
-        pill_top = (rule_y_top - 2.5 * MM_TO_PT)
-        pill_height = 5 * MM_TO_PT
-        canvas.roundRect(pill_left, height - pill_top - pill_height, right - pill_left, pill_height,
-                         2.5 * MM_TO_PT, stroke=1, fill=0)
-        canvas.setFont("Helvetica", 9.5)
-        left_y_top, right_y_top = 52 * MM_TO_PT, 66 * MM_TO_PT
-        canvas.drawString(x0, height - left_y_top - 9.5, "Left body line")
-        canvas.drawString(x0 + column_width + gap, height - right_y_top - 9.5, "Right body line")
-        canvas.save()
+    def generate(self, *, composition=None, workflow="direct_skill"):
+        self.lecture["content_hash"]=H.digest({k:v for k,v in self.lecture.items() if k!="content_hash"})
+        path=self.root/"lecture.json"
+        path.write_text(json.dumps(self.lecture,ensure_ascii=False),encoding="utf-8")
+        composition_path=None
+        if composition is not None:
+            composition_path=self.root/"composition-input.json"
+            composition_path.write_text(json.dumps(composition,ensure_ascii=False),encoding="utf-8")
+        result=render(path,self.root/"output",composition_path=composition_path,workflow_mode=workflow)
+        manifest=Path(result["manifest"])
+        return manifest,json.loads(manifest.read_text(encoding="utf-8"))
 
-        with fitz.open(pdf) as document:
-            page = document[0]
-            def bbox(value):
-                matches = page.search_for(value)
-                self.assertEqual(len(matches), 1, value)
-                box = matches[0]
-                return [box.x0, box.y0, box.x1, box.y1]
-            title_box = bbox("Topic title")
-            left_box = bbox("Left body line")
-            right_box = bbox("Right body line")
+    def change_zones(self, manifest, data, change):
+        path=Path(data["zone_plan"]["path"])
+        zones=json.loads(path.read_text(encoding="utf-8"))
+        change(zones)
+        path.write_text(json.dumps(zones,ensure_ascii=False),encoding="utf-8")
+        data["zone_plan"]=ref(path)
+        manifest.write_text(json.dumps(data,ensure_ascii=False),encoding="utf-8")
 
-        render_plan = {
-            "pages": 1,
-            "text": [
-                {"line_id": "l-1", "page": 1, "text": "Left body line", "bbox": left_box},
-                {"line_id": "l-2", "page": 1, "text": "Right body line", "bbox": right_box},
-            ],
-            "flow": [
-                {"line_id": "l-1", "page": 1, "column": 1, "flow_id": "topic-1"},
-                {"line_id": "l-2", "page": 1, "column": 2, "flow_id": "topic-1"},
-            ],
-        }
-        render_path = self.root / "render-plan.json"
-        render_path.write_text(json.dumps(render_plan), encoding="utf-8")
-        artifacts = {"pdf": ref(pdf), "profile": ref(self.profile), "render_plan": ref(render_path)}
-        candidate = self.root / "candidate-manifest.json"
-        candidate.write_text(json.dumps({"schema_version": "2.1", "artifacts": artifacts}), encoding="utf-8")
+    def test_multiple_zones_share_page_and_pass_complete_check(self):
+        path,data=self.generate()
+        result=check(path)
+        self.assertEqual(result["status"],"PDF_MECHANICS_VALIDATED")
+        self.assertEqual(result["zones"],2)
+        self.assertEqual(result["pages"],3)
+        self.assertGreater(result["links"],0)
+        self.assertEqual(check_zones(path,data["zone_plan"]["path"])["workflow"],"DIRECT_SKILL_NO_FACT_CHECK_GATE")
 
-        top = 43 * MM_TO_PT
-        bottom = 120 * MM_TO_PT
-        zone = {
-            "schema_version": "1.0",
-            "artifacts": artifacts,
-            "zones": [{
-                "zone_id": "zone-1",
-                "page": 1,
-                "topic_id": "topic-1",
-                "divider": {
-                    "title_text": "Topic title",
-                    "title_bbox": title_box,
-                    "rule_bbox": [rule_left, rule_y_top - 0.4, pill_left, rule_y_top + 0.4],
-                    "time_pill_bbox": [pill_left, pill_top, right, pill_top + pill_height],
-                },
-                "columns": [
-                    {"column": 1, "bbox": [x0, top, x0 + column_width, bottom], "line_ids": ["l-1"]},
-                    {"column": 2, "bbox": [x0 + column_width + gap, top, right, bottom], "line_ids": ["l-2"]},
-                ],
-                "balance": {"status": "BEST_LEGAL_SPLIT", "reason": "Both columns contain the legal split."},
-            }],
-        }
-        zone_path = self.root / "golden-zone-plan.json"
-        zone_path.write_text(json.dumps(zone), encoding="utf-8")
-        return candidate, zone_path
+    def test_short_indivisible_tail_uses_empty_right_column(self):
+        self.lecture["blocks"][1]["content"]=[{"type":"paragraph","runs":[{"type":"text","text":"Короткое определение."}]}]
+        path,data=self.generate()
+        zones=json.loads(Path(data["zone_plan"]["path"]).read_text(encoding="utf-8"))["zones"]
+        self.assertEqual(zones[-1]["balance"]["status"],"INDIVISIBLE_CONTENT")
+        self.assertEqual(zones[-1]["columns"][1]["line_ids"],[])
+        self.assertEqual(check(path)["zones"],2)
 
-    def test_valid_multizone_plan_checks_actual_pdf(self):
-        result = ZONES.check(self.candidate, self.zone_plan)
-        self.assertEqual(result["status"], "GOLDEN_ZONE_MECHANICS_VALIDATED")
-        self.assertEqual(result["covered_body_lines"], 2)
+    def test_continuation_has_no_repeated_title(self):
+        self.lecture["blocks"][0]["content"]*=16
+        path,data=self.generate()
+        zones=json.loads(Path(data["zone_plan"]["path"]).read_text(encoding="utf-8"))["zones"]
+        continuation=[z for z in zones if z["topic_id"]=="topic"][1:]
+        self.assertTrue(continuation)
+        self.assertTrue(all(z["divider"] is None for z in continuation))
+        check(path)
+
+    def test_omitted_entire_topic_is_rejected(self):
+        path,data=self.generate()
+        self.change_zones(path,data,lambda z:z["zones"].pop())
+        with self.assertRaisesRegex(ValueError,"every body line"):
+            check(path)
+
+    def test_false_balance_declaration_is_rejected(self):
+        path,data=self.generate()
+        self.change_zones(path,data,lambda z:z["zones"][0]["balance"].update(status="INDIVISIBLE_CONTENT"))
+        with self.assertRaisesRegex(ValueError,"balance"):
+            check(path)
 
     def test_shifted_column_is_rejected(self):
-        value = json.loads(self.zone_plan.read_text(encoding="utf-8"))
-        value["zones"][0]["columns"][1]["bbox"][0] += 4
-        self.zone_plan.write_text(json.dumps(value), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "Column 2 x coordinate"):
-            ZONES.check(self.candidate, self.zone_plan)
+        path,data=self.generate()
+        def change(z):
+            z["zones"][0]["columns"][1]["bbox"][0]+=4
+        self.change_zones(path,data,change)
+        with self.assertRaisesRegex(ValueError,"Column 2"):
+            check(path)
 
-    def test_unlisted_topic_line_is_rejected(self):
-        value = json.loads(self.zone_plan.read_text(encoding="utf-8"))
-        value["zones"][0]["columns"][1]["line_ids"] = []
-        self.zone_plan.write_text(json.dumps(value), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "invalid line IDs"):
-            ZONES.check(self.candidate, self.zone_plan)
+    def test_full_cycle_requires_handoff_before_rendering(self):
+        with self.assertRaisesRegex(ValueError,"handoff"):
+            self.generate(workflow="full_cycle")
+        self.assertFalse((self.root/"output").exists())
 
+    def test_supplied_visual_and_caption_are_preserved(self):
+        from PIL import Image
+        image=self.root/"visual.png"
+        Image.new("RGB",(400,180),"navy").save(image)
+        composition={"visuals":[{"visual_id":"v1","image":ref(image),"source":ref(image),
+                                "text_block_ids":["b1"],"role":"Synthetic diagram",
+                                "caption":"Исходное изображение для проверки размещения."}]}
+        path,data=self.generate(composition=composition)
+        self.assertEqual(check(path)["visuals"],1)
 
-if __name__ == "__main__":
+if __name__=="__main__":
     unittest.main()

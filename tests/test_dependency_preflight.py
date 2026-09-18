@@ -1,5 +1,8 @@
 """Dependency preflight: no installation occurs before an explicit consent flag."""
 import os
+import json
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -16,6 +19,34 @@ import dependency_preflight as preflight
 
 
 class DependencyPreflightChecks(unittest.TestCase):
+    def test_installed_package_does_not_require_repository_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            plugin = Path(temporary)/"cache/marketplace/plugin/0.1.0"
+            shutil.copytree(ROOT, plugin)
+            result = subprocess.run([sys.executable, str(plugin/"scripts/dependency_preflight.py"),
+                                     "--current-python", "--no-math", "--json"],
+                                    capture_output=True, text=True, encoding="utf-8", timeout=30)
+            report = json.loads(result.stdout)
+            self.assertIn(report["status"], ("READY","ACTION_REQUIRED"))
+            self.assertEqual(Path(report["python"]["requirements_file"]), plugin/"requirements.txt")
+            self.assertEqual(report["tectonic"]["status"], "NOT_REQUIRED")
+
+    def test_installer_targets_managed_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            interpreter = Path(temporary)/"venv/Scripts/python.exe"
+            with patch.object(preflight, "managed_python_path", return_value=interpreter), patch.object(preflight, "run_checked") as run:
+                preflight.install_python_requirements(ROOT/"requirements.txt")
+            commands=[call.args[0] for call in run.call_args_list]
+            self.assertEqual(commands[0][1:3], ["-m","venv"])
+            self.assertEqual(commands[1][0], str(interpreter))
+            self.assertNotEqual(commands[1][0], sys.executable)
+
+    def test_smoke_uses_production_tex_template(self):
+        from latex_math import tex_source
+        source=preflight._smoke_source()
+        self.assertIn(r"\RequirePackage{fix-cm}",source)
+        self.assertIn("SFBOX",source)
+
     def test_runtime_manifest_matches_supported_python_requirements(self):
         requirements = preflight.read_runtime_requirements()
         self.assertEqual(requirements["schema_version"], "0.1.0")

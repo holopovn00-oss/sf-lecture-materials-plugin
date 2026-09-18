@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import importlib.util
 import json
@@ -51,6 +52,43 @@ def same_ref(left, right):
             left["sha256"].upper() == right["sha256"].upper())
 
 
+def verify_selected_changes(checked, selected, report, fact):
+    """Every changed character must be an approved replacement at its original address."""
+    before = json.loads(Path(checked["path"]).read_text(encoding="utf-8-sig"))
+    after = json.loads(Path(selected["path"]).read_text(encoding="utf-8-sig"))
+    def skeleton(document):
+        value = copy.deepcopy(document)
+        value.pop("content_hash", None)
+        for block in value["blocks"]:
+            for content in block["content"]:
+                for item in content.get("runs", [content]):
+                    for key in ("text", "latex"):
+                        if key in item:
+                            item[key] = "<approved-content>"
+        return value
+    require(skeleton(before) == skeleton(after), "Unapproved change to lecture structure or metadata")
+    units_before = fact.input_units(checked)
+    units_after = fact.input_units(selected)
+    replacements = {}
+    for claim in report["claims"]:
+        if claim["review"]["decision"] != "correct":
+            continue
+        anchor = claim["anchor"]
+        target = claim["review"]["application"]["anchor"]
+        require(target["unit_id"] == anchor["unit_id"], "Correction moved to another text block")
+        replacements.setdefault(anchor["unit_id"], []).append(
+            (anchor["start"], anchor["end"], claim["assessment"]["proposal"]["text"]))
+    for identifier, (original, _) in units_before.items():
+        cursor, parts = 0, []
+        for start, end, replacement in sorted(replacements.get(identifier, [])):
+            require(start >= cursor, "Overlapping corrections need one combined approved proposal")
+            parts.extend([original[cursor:start], replacement])
+            cursor = end
+        parts.append(original[cursor:])
+        require("".join(parts) == units_after[identifier][0],
+                f"Unapproved text change outside agreed corrections: {identifier}")
+
+
 def check(handoff_path):
     raw = Path(handoff_path).read_bytes()
     handoff = json.loads(raw.decode("utf-8-sig"))
@@ -90,10 +128,12 @@ def check(handoff_path):
             if claim["assessment"]["proposal"] is not None:
                 retained.append(identifier)
         elif review["decision"] == "pending":
-            require(claim["assessment"]["proposal"] is None,
+            require(not fact.decision_required(claim),
                     "Actionable fact-check decision is pending")
         else:
             raise ValueError("Unknown fact-check decision")
+
+    verify_selected_changes(checked_lecture, selected_lecture, report, fact)
 
     resolution = handoff["coverage_resolution"]
     keys(resolution, "status comment basis")

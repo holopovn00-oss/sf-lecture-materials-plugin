@@ -1,6 +1,6 @@
 ---
 name: sf-lecture-materials
-description: Start the complete SF Lecture Materials cycle: source materials to accepted lecture text, human-decided fact check, and Golden Gate PDF candidate. Use direct specialist skills only when the user explicitly selects one.
+description: "Start the complete SF Lecture Materials cycle: source materials to accepted lecture text, human-decided fact check, and Golden Gate PDF candidate. Use direct specialist skills only when the user explicitly selects one."
 ---
 
 # SF Lecture Materials: полный цикл
@@ -14,13 +14,13 @@ description: Start the complete SF Lecture Materials cycle: source materials to 
 
 ## Стартовая проверка PDF-среды
 
-При первом запуске полного цикла до приёма материалов проверь PDF-среду:
+При первом запуске полного цикла проверь PDF-среду, не блокируя прием материалов, редактуру или фактчек отсутствующими PDF-зависимостями:
 
 1. Выполни `python <plugin-root>/scripts/dependency_preflight.py --json`.
 2. При `READY` кратко зафиксируй, что среда PDF готова, и продолжи прием материалов.
-3. При `ACTION_REQUIRED` перечисли только отсутствующие компоненты и попроси явное подтверждение: «установить зависимости». Не устанавливай ничего, не скачивай TeX-ресурсы и не начинай цикл до ответа пользователя.
-4. Только после такого подтверждения выполни `python <plugin-root>/scripts/dependency_preflight.py --install --approve-install --json`. Продолжай цикл лишь после нового статуса `READY`.
-5. При `BLOCKED` сообщи конкретный блокер и не подменяй Tectonic другой системой TeX.
+3. При `ACTION_REQUIRED` перечисли отсутствующие компоненты. Установка требует явного разрешения, но не специальной дословной команды; уже выданное разрешение в этой задаче не спрашивай повторно. До разрешения не устанавливай и не скачивай ресурсы; текстовые этапы продолжай.
+4. После разрешения выполни `python <plugin-root>/scripts/dependency_preflight.py --install --approve-install --json`. Установка Python-пакетов изолирована в managed venv. Последующие PDF-команды запускай через `python.interpreter` из отчета.
+5. Перед PDF требуется новый `READY`. Если выбранный текст не содержит формул, используй `--no-math`: Tectonic и TeX-кэш не нужны. При `BLOCKED` сообщи конкретный блокер PDF, не подменяй Tectonic другим TeX-движком и не останавливай независимые текстовые этапы.
 
 ## Прием материалов
 

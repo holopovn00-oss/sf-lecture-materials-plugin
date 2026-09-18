@@ -143,8 +143,28 @@ class FullCycleHandoffTests(unittest.TestCase):
 
     def test_keep_is_retained_without_changing_assessment(self):
         report = self.report(decision="keep", execution="kept")
+        self.selected_path.write_bytes(self.checked_path.read_bytes())
         receipt = GATE.check(self.handoff(self.write_report(report)))
         self.assertEqual(receipt["retained_findings"], ["FC-001"])
+
+    def test_keep_cannot_silently_select_changed_text(self):
+        report = self.report(decision="keep", execution="kept")
+        with self.assertRaisesRegex(ValueError, "Unapproved text change"):
+            GATE.check(self.handoff(self.write_report(report)))
+
+    def test_applied_correction_cannot_change_neighbouring_text(self):
+        self.selected["blocks"][0]["content"][-1]["runs"][0]["text"] += " Unapproved addition."
+        self.selected["content_hash"] = H.digest({k:v for k,v in self.selected.items() if k != "content_hash"})
+        self.selected_path.write_text(json.dumps(self.selected, ensure_ascii=False), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "Unapproved text change"):
+            GATE.check(self.handoff(self.write_report(self.report())))
+
+    def test_minor_proposal_does_not_block_unchanged_lecture(self):
+        report = self.report(decision="pending", execution="pending")
+        report["claims"][0]["assessment"]["decision_required"] = False
+        self.selected_path.write_bytes(self.checked_path.read_bytes())
+        result = GATE.check(self.handoff(self.write_report(report)))
+        self.assertEqual(result["pdf_gate"], "READY_FOR_PDF")
 
     def test_partial_coverage_requires_explicit_limit_acceptance(self):
         report_path = self.write_report(self.report(coverage="partial"))

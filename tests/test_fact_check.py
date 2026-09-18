@@ -99,6 +99,32 @@ class FactCheckTests(unittest.TestCase):
         self.assertEqual(F.arithmetic("0.1+0.2"), F.arithmetic("3/10"))
         self.assertEqual(F.arithmetic("(1+0.12/4)**4-1"), F.arithmetic("0.12550881"))
 
+    def test_daily_compounding_and_fractional_powers(self):
+        from decimal import Decimal
+        exact = F.arithmetic("(1+0.06/365)**365-1")
+        numeric = F.decimal_arithmetic("(1+0.06/365)**365-1")
+        self.assertLess(abs(float(exact)-float(numeric)), 1e-14)
+        self.assertLess(abs(F.decimal_arithmetic("1.1**(1/12)-1")-Decimal("0.007974140428903741")), Decimal("1e-17"))
+        self.assertLess(abs(F.decimal_arithmetic("ln(exp(0.06))")-Decimal("0.06")), Decimal("1e-45"))
+
+    def test_numeric_evidence_checks_declared_tolerance(self):
+        self.report["evidence"][0].update(expression="sqrt(2)", result="1.414213562373095",
+            numeric={"precision":50,"absolute_tolerance":"1e-14","relative_tolerance":"0"})
+        F.validate(self.report)
+        self.report["evidence"][0]["result"]="1.41"
+        with self.assertRaisesRegex(ValueError, "incorrect"):
+            F.validate(self.report)
+
+    def test_decimal_evaluator_rejects_code_and_resource_abuse(self):
+        for text in ("__import__('os')", "exp(1001)", "2**10000", "open('x')", "1e9999", "sqrt(-1)"):
+            with self.subTest(text=text), self.assertRaises((ValueError, ArithmeticError)):
+                F.decimal_arithmetic(text)
+
+    def test_known_error_cannot_be_hidden_as_minor(self):
+        self.report["claims"][0]["assessment"]["decision_required"] = False
+        with self.assertRaisesRegex(ValueError, "errors require"):
+            F.validate(self.report)
+
     def test_code_and_unbounded_arithmetic_are_rejected(self):
         for expression in ("__import__('os').system('echo no')", "open('x')", "True+1", "2**10000",
                            "9**9**9", "[1][0]", "1/0", "1e9999", "1" * 1001):

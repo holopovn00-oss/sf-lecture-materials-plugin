@@ -37,6 +37,8 @@
 
 ## Правила gate
 
+Выбранная редакция может отличаться только точными примененными заменами correct. Остальные строки, структура и метаданные сохраняются. При отсутствии correct можно выбрать исходный неизмененный файл. Необязательные proposal с decision_required=false не блокируют передачу; error/outdated всегда требуют решения.
+
 - Любой \`correct\` должен иметь \`execution:"applied"\`; artifact каждой такой application должен быть точно равен \`selected_lecture\`.
 - Любой \`keep\` должен иметь \`execution:"kept"\`. Такой claim остается retained finding: исходный assessment не меняется.
 - \`pending\` на actionable claim и любой \`recheck\` блокируют handoff.

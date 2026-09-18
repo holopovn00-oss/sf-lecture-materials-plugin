@@ -59,6 +59,8 @@ def check_current(manifest_path, media_check, reports_check):
     text_rows, math_rows, flow = plan.get("text"), plan.get("math"), plan.get("flow")
     require(isinstance(text_rows, list) and isinstance(math_rows, list) and isinstance(flow, list) and flow,
             "Missing text, math or flow plan")
+    from verify_golden_zones import load_zones, check_geometry
+    zones, zone_by_line = load_zones(manifest, refs, plan)
     require([r.get("formula_id") for r in math_rows] == list(formulas), "Missing, reordered or repeated formula occurrence")
     indexed, content_groups, line_counts = {}, [], Counter()
     for row in flow:
@@ -247,13 +249,14 @@ def check_current(manifest_path, media_check, reports_check):
                                 + pdfmetrics.getAscent(FONT_NAME, style["heading_size"]))) < .2,
                             "Topic heading placement differs")
             heading_top_gap = style["heading_gap"] if row.get("topic_heading") and style.get("trim_heading_top") else 0
-            column_key = (row["page"], row["column"])
+            zone_index = zone_by_line.get(row["line_id"], 0)
+            column_key = (row["page"], zone_index, row["column"])
             first_trim = heading_top_gap if column_key not in seen_columns else 0
             top += first_trim
             seen_columns.add(column_key)
             seen_topics.add(row["flow_id"])
             require(top >= 0 and top + line_height - first_trim <= style["bottom"] + 0.2, "Body content exceeds vertical frame")
-            order = (row["page"], row["column"], top)
+            order = (row["page"], zone_index, row["column"], top)
             require(previous_order is None or order > previous_order, "Body flow is physically repeated or reordered")
             previous_order = order
             measured.append({**row, "top": top, "height": line_height, "ascent": ascent,
@@ -262,10 +265,11 @@ def check_current(manifest_path, media_check, reports_check):
                              "paragraph_lines": line_counts[key]})
         pairs = {}
         for unit in measured:
-            pairs.setdefault(unit["page"], [[], []])[unit["column"] - 1].append(unit)
+            key = (unit["page"], zone_by_line.get(unit["line_id"], 0))
+            pairs.setdefault(key, [[], []])[unit["column"] - 1].append(unit)
         section_by_topic = {t["topic_id"]: t["section_id"] for t in lecture["structure"]["topics"]}
         reports = []
-        for page, columns in pairs.items():
+        for (page, zone_index), columns in pairs.items():
             topics = list(dict.fromkeys(u["flow_id"] for c in columns for u in c))
             require(len({section_by_topic[t] for t in topics}) == 1, "Major sections must not share a page")
             if profile["pagination"].get("new_topic_starts_new_page", True):
@@ -274,7 +278,8 @@ def check_current(manifest_path, media_check, reports_check):
                 require(all(any(u.get("topic_heading") for u in measured if u["flow_id"] == t) for t in topics),
                         "Continuous topics require visible headings")
             require(columns[0], "Right column cannot precede an empty left column")
-            top = columns[0][0]["top"]
+            zone = zones[zone_index] if zones else None
+            top = zone["columns"][0]["bbox"][1] if zone else columns[0][0]["top"]
             for units in columns:
                 y, previous = top, None
                 for unit in units:
@@ -283,15 +288,21 @@ def check_current(manifest_path, media_check, reports_check):
                     y += unit["height"] - (unit.get("heading_top_gap", 0) if previous is None else 0)
                     previous = unit
             together = columns[0] + columns[1]
-            optimum = best_split(together, style["bottom"] - top, style)
+            bottom = zone["columns"][0]["bbox"][3] if zone else style["bottom"]
+            optimum = best_split(together, bottom - top, style)
             require(optimum and optimum[0] == len(columns[0]), "Unbalanced rich columns: a better legal split exists")
+            if zone:
+                require(zone.get("balance", {}).get("status") == optimum[2],
+                        "Recorded zone balance differs from measured legal split")
             heights = [extent(c, style["gap"]) for c in columns]
-            reports.append({"page": page, "topic_ids": topics, "line_counts": [len(c) for c in columns],
+            reports.append({"page": page, "zone_id": zone["zone_id"] if zone else None,
+                            "topic_ids": topics, "line_counts": [len(c) for c in columns],
                             "heights_pt": [round(h, 4) for h in heights], "height_difference_pt": round(abs(heights[0] - heights[1]), 4),
                             "balance_basis": optimum[2], "measurement": "ACTUAL_GLYPHS_AND_VERIFIED_MATH"})
         for i in range(1, len(measured)):
             if (measured[i]["page"], measured[i]["column"]) != (measured[i-1]["page"], measured[i-1]["column"]):
                 require(allowed_break(measured, i, style), "Paragraph widow/orphan or indivisible content was split")
+        zone_status = check_geometry(doc, zones, measured, style, lecture) if zones else {}
         visuals, links = media_check(doc, composition, plan, block_ids, text_rows)
         visual_status, text_status, workflow_status = reports_check(doc, manifest, refs, lecture, {bid: block_text(b) for bid, b in blocks.items()})
         return {"status": "PDF_MECHANICS_VALIDATED", "pdf_sha256": refs["pdf"]["sha256"].upper(),
@@ -300,5 +311,7 @@ def check_current(manifest_path, media_check, reports_check):
                 "math_compile_evidence": "RECORDED_NOT_AUTHENTICATED", "column_balance": "VALIDATED", "column_pairs": reports,
                 "visuals": len(visuals), "links": len(links), "bookmarks": len(plan["bookmarks"]),
                 "semantic_review": "NOT_EVALUATED_BY_SCRIPT", "visual_review": visual_status, "text_review": text_status,
-                "workflow": workflow_status, "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT",
+                 "workflow": workflow_status, "manual_acceptance": "NOT_EVALUATED_BY_SCRIPT",
+                 "zones": zone_status.get("zones", 0), "covered_body_lines": zone_status.get("covered_body_lines", 0),
+                 "zone_mechanics": zone_status.get("status", "NOT_REQUESTED"),
                 "golden_gate": "NOT_CERTIFIED_BY_THIS_CHECKER"}

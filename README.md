@@ -42,7 +42,7 @@ python plugins/sf-lecture-materials/scripts/dependency_preflight.py --install --
 python -m unittest discover -s tests -v
 ~~~
 
-Python-пакеты перечислены в [requirements.txt](requirements.txt); Tectonic и его кэш — в [runtime-requirements.json](runtime-requirements.json). Tectonic не ставится через pip. Сценарий сначала использует встроенный runtime Codex и загружает закрепленный официальный бинарник с проверкой SHA-256 только после подтвержденной установки.
+Python-пакеты перечислены в [requirements.txt](requirements.txt); Tectonic и его кэш — в [runtime-requirements.json](plugins/sf-lecture-materials/runtime-requirements.json). Tectonic не ставится через pip. Сценарий сначала использует встроенный runtime Codex и загружает закрепленный официальный бинарник с проверкой SHA-256 только после подтвержденной установки.
 
 Для изменений PDF-контура используйте [GitHub-gates](docs/GITHUB_GOVERNANCE.md). Полный PDF-релиз требует отдельной визуальной и ручной проверки.
 
@@ -56,3 +56,5 @@ Python-пакеты перечислены в [requirements.txt](requirements.tx
 - [Автоматические проверки PDF](plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/references/automated-checks.md)
 - [Индекс документации](docs/README.md)
 - [Сведения о сторонних ресурсах](THIRD_PARTY_NOTICES.md)
+
+PDF-зависимости не блокируют текстовые этапы. Для PDF без формул preflight принимает `--no-math`. Python-пакеты устанавливаются в отдельное managed venv; команды сборки выполняются через `python.interpreter` из отчета. Полный рендерер: `plugins/sf-lecture-materials/scripts/render_golden.py`.

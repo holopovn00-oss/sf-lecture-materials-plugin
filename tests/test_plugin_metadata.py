@@ -44,7 +44,7 @@ class PluginMetadataChecks(unittest.TestCase):
         self.assertIn("не переходи к pdf автоматически", fact_check.lower())
 
     def test_runtime_requirements_and_preflight_are_declared(self):
-        runtime = json.loads((REPO / "runtime-requirements.json").read_text(encoding="utf-8"))
+        runtime = json.loads((ROOT / "runtime-requirements.json").read_text(encoding="utf-8"))
         self.assertEqual(runtime["schema_version"], "0.1.0")
         self.assertEqual(runtime["python"]["requirements_file"], "requirements.txt")
         self.assertEqual(runtime["runtime"]["tectonic"]["managed_version"], "0.17.0")

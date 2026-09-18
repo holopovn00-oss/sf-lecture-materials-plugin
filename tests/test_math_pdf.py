@@ -97,6 +97,19 @@ class ParagraphBoundaryChecks(unittest.TestCase):
 
 @unittest.skipUnless(TECTONIC, "Tectonic is required for the LaTeX/PDF integration gate")
 class MathPdfChecks(unittest.TestCase):
+    def test_shipped_renderer_accepts_applied_full_cycle_handoff(self):
+        from test_full_cycle_handoff import FullCycleHandoffTests
+        from render_golden import render
+        case = FullCycleHandoffTests()
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        gate = case.handoff(case.write_report(case.report()))
+        result = render(case.selected_path, case.root/"full-pdf",
+                        handoff_path=gate, workflow_mode="full_cycle")
+        receipt = PDF.check(result["manifest"])
+        self.assertEqual(receipt["workflow"], "FULL_CYCLE_FACT_CHECK_GATE_VALIDATED")
+        self.assertGreater(receipt["formulas"], 0)
+
     @classmethod
     def setUpClass(cls):
         cls.cache_tmp = tempfile.TemporaryDirectory()

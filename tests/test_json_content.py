@@ -136,6 +136,10 @@ class CurrentJsonChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "math run"):
             H.build(self.sources, self.draft)
 
+    def test_technical_paths_and_regex_are_not_math(self):
+        self.draft["blocks"][0]["content"][0]["runs"][0]["text"] = r"Open C:\Users\Student; regex \d+ matches digits."
+        H.build(self.sources, self.draft)
+
     def test_malformed_or_document_latex_is_rejected(self):
         for latex in (r"\frac{r}{m", r"\input{secret}", r"\begin{document}x\end{document}", "$r^2$"):
             with self.subTest(latex=latex), self.assertRaises(ValueError):

@@ -1,24 +1,24 @@
 name: Release validation
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
   pull_request:
-    paths:
-      - ".github/workflows/release-validate.yml"
-      - "plugins/sf-lecture-materials/scripts/latex_math.py"
-      - "plugins/sf-lecture-materials/scripts/pdf_flow.py"
-      - "plugins/sf-lecture-materials/scripts/verify_full_cycle_handoff.py"
-      - "plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/**"
-      - "tests/test_math_pdf.py"
-      - "tests/test_golden_zones.py"
-      - "tests/test_full_cycle_handoff.py"
 
 permissions:
   contents: read
 
 jobs:
   release-validate:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
           python-version: "3.11"
       - uses: wtfjoke/setup-tectonic@v4
         with:
-          tectonic-version: "0.15.0"
+          tectonic-version: "0.17.0"
       - name: Install declared dependencies
         run: python -m pip install -r requirements.txt
       - name: Prime isolated TeX cache
@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           export SF_TECTONIC_CACHE="$RUNNER_TEMP/sf-tectonic-cache"
           python plugins/sf-lecture-materials/scripts/latex_math.py \
-            --latex '\\mathrm{EAR}=\\left(1+\\frac{r}{m}\\right)^m-1' \
+            --latex '\mathrm{EAR}=\left(1+\frac{r}{m}\right)^m-1' \
             --mode display --size 9.5 \
             --out "$RUNNER_TEMP/sf-math-warmup" --allow-downloads
       - name: Run complete release gate

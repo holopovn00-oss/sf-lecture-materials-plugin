@@ -123,7 +123,7 @@ def validate_content(blocks):
                                 "Text run must contain text")
                         require("\n" not in value and "\r" not in value,
                                 "Paragraph boundaries must be content items, not newlines in text runs")
-                        require(not re.search(r"\\[A-Za-z]+|\\[\[(]|\$\$", value),
+                        require(not re.search(r"\\(?:frac|dfrac|tfrac|sqrt|mathrm|mathbf)\s*\{|\\[\[(]|\$\$", value),
                                 "LaTeX belongs in a math run, not in ordinary text")
                         visible = visible or bool(value.strip())
                     else:

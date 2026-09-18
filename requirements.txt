@@ -1,7 +1,2 @@
-# Python packages used by PDF construction and verification.
-# Tectonic is a standalone runtime, not a pip package: see runtime-requirements.json
-# and scripts/dependency_preflight.py for its verified first-run check/install flow.
-PyMuPDF>=1.24,<2
-Pillow>=10,<13
-reportlab>=4,<6
-pyphen==0.17.2
+# Canonical dependencies ship inside the installable plugin.
+-r plugins/sf-lecture-materials/requirements.txt

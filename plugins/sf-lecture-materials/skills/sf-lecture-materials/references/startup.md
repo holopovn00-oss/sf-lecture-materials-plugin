@@ -4,11 +4,11 @@
 
 ## Проверка PDF-среды
 
-До первого приема материалов выполни `python <plugin-root>/scripts/dependency_preflight.py --json`.
+При первом запуске выполни `python <plugin-root>/scripts/dependency_preflight.py --json`. Отсутствие PDF-зависимостей не блокирует прием материалов, редактуру и фактчек.
 
 - `READY`: одной строкой сообщи, что PDF-среда готова, затем используй сценарий ниже.
-- `ACTION_REQUIRED`: покажи отсутствующие компоненты и попроси одно явное подтверждение: «установить зависимости». Ничего не устанавливай до него.
-- После подтверждения выполни `python <plugin-root>/scripts/dependency_preflight.py --install --approve-install --json`. К материалам переходи только при `READY`.
+- `ACTION_REQUIRED`: покажи отсутствующие компоненты. До установки требуется явное разрешение, но не специальная дословная команда; уже данное разрешение не спрашивай повторно.
+- После разрешения выполни `python <plugin-root>/scripts/dependency_preflight.py --install --approve-install --json`. Перед PDF требуется `READY`; последующие PDF-команды используй с `python.interpreter` из отчета. Если формул нет, добавь `--no-math`.
 - `BLOCKED`: покажи блокер без замены Tectonic на иной TeX-движок.
 
 ## Материалов еще нет

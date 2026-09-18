@@ -9,16 +9,16 @@ scripts/verify_candidate.py только читает файлы. Нужны Pyt
 Из корня плагина:
 
 ~~~powershell
-python scripts/latex_math.py --latex '\\mathrm{EAR}=\\left(1+\\frac{r}{m}\\right)^m-1' --mode display --size 9.5 --out 'C:/Task/math/ear' --tectonic 'C:/Tools/tectonic.exe' --cache-dir 'C:/Task/tectonic-cache'
+python scripts/latex_math.py --latex '\mathrm{EAR}=\left(1+\frac{r}{m}\right)^m-1' --mode display --size 9.5 --out 'C:/Task/math/ear' --tectonic 'C:/Tools/tectonic.exe' --cache-dir 'C:/Task/tectonic-cache'
 ~~~
 
 Перед запуском PDF-навыка выполни scripts/dependency_preflight.py --json. Резолвер выбирает Tectonic в порядке: явный --tectonic, SF_TECTONIC, PATH, встроенный Codex LaTeX runtime, затем ранее установленный managed runtime. По умолчанию используется --only-cached и общий managed cache. Если не хватает Python-пакетов, Tectonic или его кэша, preflight возвращает ACTION_REQUIRED; скачивание и установка возможны только после явного подтверждения пользователя через --install --approve-install. Полный TeX Live не является заменой Tectonic и автоматически не устанавливается.
 
-Помощник принимает ограниченное математическое выражение, запускает Tectonic в --untrusted, ограничивает компиляцию 45 секундами и не перезаписывает существующий неполный результат. Неудача оставляет диагностический лог, но не успешный math.json. Успех создаёт vector math.pdf, math.json, исходный служебный math.tex и логи. Эти файлы являются материалами сборки, а не дополнительной редакцией лекционного текста.
+Помощник принимает ограниченное математическое выражение и запускает Tectonic в --untrusted. Офлайн-компиляция ограничена 45 секундами, явно разрешенный холодный запуск со скачиванием — 300 секундами. Существующий неполный результат не перезаписывается. Неудача оставляет диагностику, но не успешный math.json. Успех создает векторный math.pdf, math.json, служебный math.tex и логи; это материалы сборки, а не дополнительная редакция текста.
 
 Math receipt содержит точный LaTeX, режим inline/display, кегль, рецепт/хеши, пути и SHA-256 PDF/TeX/логов, измеренные размер и baseline. Проверка обнаруживает несовместимую формулу, размер и изменённый файл. Запись компиляции является RECORDED_NOT_AUTHENTICATED; она не удостоверяет происхождение чужого лога или математическую верность источника.
 
-scripts/pdf_flow.py — компонент основного текста: build_units измеряет JSON и проверенные assets; paginate выбирает страницы/колонки с допустимыми переносами; draw_body размещает Inter и пишет план; insert_math переносит векторные формулы в новый PDF в масштабе 1:1. Обложка, содержание, карточки и ссылки остаются в локальном рендерере конкретной лекции.
+scripts/pdf_flow.py размещает основной текст. scripts/render_golden.py собирает полный Golden PDF, composition, render-plan, golden-zone-plan, candidate-manifest и QA, затем запускает общий валидатор. Используй --lecture, --out (новый каталог), --workflow direct_skill либо full_cycle с --handoff; --composition передает предоставленные растровые визуалы. Сборка не устанавливает зависимости и не принимает результат за пользователя.
 
 ## Manifest и план
 
@@ -34,6 +34,7 @@ candidate-manifest.json:
 - artifacts: ровно pdf, lecture, composition, render_plan, profile.
 - lecture: полный проверенный LectureText 3.0.0; profile: закреплённый A4 2.1.0.
 - workflow: ровно {mode, full_cycle_handoff}. mode — "direct_skill" с null handoff либо "full_cycle" со ссылкой {kind:"full_cycle_handoff", path, sha256}.
+- zone_plan: файловая ссылка на golden-zone-plan.json обязательна для многозонной композиции; отсутствие означает только низкоуровневый однозонный макет.
 - text_review и visual_review: необязательные файловые ссылки или null.
 
 Для "full_cycle" verify_candidate.py запускает full-cycle handoff и требует статус FULL_CYCLE_FACT_CHECK_GATE_VALIDATED, а также равенство SHA-256 выбранного LectureText. Для "direct_skill" результат workflow — DIRECT_SKILL_NO_FACT_CHECK_GATE: это явно отдельный режим, а не утверждение о прохождении фактчека.
@@ -52,7 +53,7 @@ composition.json хранит visuals в том же порядке: уника�
 
 ## Ограничение принятого Golden
 
-Полноширинные разделители создают несколько двухколоночных участков на странице. Общий verify_candidate пока не сертифицирует такой макет. Скрипт конкретной лекции должен проверить каждый участок, полный текст, разделители, визуалы и навигацию адресно; результат не называется PASS общего валидатора. Требуется визуальный просмотр всех страниц. Встроенные заголовки build_units не заменяют полноширинные разделители.
+Полноширинные разделители создают несколько зон на странице. verify_candidate загружает manifest.zone_plan и проверяет порядок page → zone → column → line, полное однократное покрытие текста, реальную геометрию разделителей и симметрию рамок. Баланс вычисляется отдельно внутри каждой зоны. Продолжения не повторяют заголовок. Короткий неделимый остаток может занимать только левую колонку; фиктивный статус INDIVISIBLE_CONTENT отклоняется.
 
 ## Что проверяется
 
@@ -77,7 +78,7 @@ text_review ссылается на отчёт текстового навыка
 
 ## Многозонная композиция Golden Gate
 
-Для принятой композиции с полноширинной строкой «название — линия — время» и последующим двухколоночным потоком общий `verify_candidate.py` остаётся базовой проверкой кандидата, но не удостоверяет саму форму зон. Локальный рендерер обязан дополнительно сохранить `golden-zone-plan.json` по [контракту 1.0](contracts/a4/golden-zone-plan-1.0.0.json).
+Для принятой композиции общий `verify_candidate.py` проверяет зоны в составе полного кандидата. Рендерер сохраняет `golden-zone-plan.json` по [контракту 1.0](contracts/a4/golden-zone-plan-1.0.0.json) и ссылку на него в manifest.zone_plan.
 
 План ссылается на те же фактические PDF, профиль A4 и render-plan, что и candidate manifest, по абсолютным путям и SHA-256. Для каждой зоны он содержит страницу, `topic_id`, геометрию названия, линии и плашки времени, две физические колонки, точные `line_id` основного текста и решение по балансу. Статус `BEST_LEGAL_SPLIT` допустим только при непустых обеих колонках; `INDIVISIBLE_CONTENT` требует объяснения.
 

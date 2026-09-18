@@ -62,8 +62,10 @@ def tex_source(latex, mode, size_pt):
 
 
 def compile_math(latex, mode, size_pt, out, *, tectonic=None, cache_dir=None,
-                 allow_downloads=False, timeout=45):
+                 allow_downloads=False, timeout=None):
     """Create a PDF and JSON receipt in a new directory; reuse only matching assets."""
+    if timeout is None:
+        timeout = 300 if allow_downloads else 45
     import fitz
     source = tex_source(latex, mode, size_pt)
     out = Path(out).resolve()
