@@ -45,7 +45,13 @@ class DependencyPreflightChecks(unittest.TestCase):
             binary = home / "plugins/cache/openai-bundled/latex/0.17.0/bin/tectonic.exe"
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"not executed in this test")
-            with patch.object(preflight, "codex_home", return_value=home),                  patch.object(preflight, "_probe_tectonic", return_value="0.17.0"),                  patch.object(preflight, "managed_tectonic_path", return_value=None),                  patch.object(preflight.shutil, "which", return_value=None),                  patch.dict(os.environ, {"SF_TECTONIC": ""}, clear=False):
+            with (
+                patch.object(preflight, "codex_home", return_value=home),
+                patch.object(preflight, "_probe_tectonic", return_value="0.17.0"),
+                patch.object(preflight, "managed_tectonic_path", return_value=None),
+                patch.object(preflight.shutil, "which", return_value=None),
+                patch.dict(os.environ, {"SF_TECTONIC": ""}, clear=False),
+            ):
                 result = preflight.resolve_tectonic()
         self.assertEqual(result["source"], "bundled_codex_latex")
         self.assertEqual(result["version"], "0.17.0")
@@ -58,7 +64,13 @@ class DependencyPreflightChecks(unittest.TestCase):
             "installed": None,
             "status": "MISSING",
         }]
-        with patch.object(preflight, "check_python_runtime", return_value={"status": "READY"}),              patch.object(preflight, "check_python_packages", return_value=packages),              patch.object(preflight, "resolve_tectonic", return_value=None),              patch.object(preflight, "artifact_for_current_platform", return_value={"filename": "tectonic.zip"}),              patch.object(preflight, "pip_is_available", return_value=True):
+        with (
+            patch.object(preflight, "check_python_runtime", return_value={"status": "READY"}),
+            patch.object(preflight, "check_python_packages", return_value=packages),
+            patch.object(preflight, "resolve_tectonic", return_value=None),
+            patch.object(preflight, "artifact_for_current_platform", return_value={"filename": "tectonic.zip"}),
+            patch.object(preflight, "pip_is_available", return_value=True),
+        ):
             report = preflight.inspect_dependencies()
         self.assertEqual(report["status"], "ACTION_REQUIRED")
         self.assertEqual(
@@ -68,7 +80,10 @@ class DependencyPreflightChecks(unittest.TestCase):
         self.assertTrue(all(item["requires_user_confirmation"] for item in report["actions"]))
 
     def test_install_flag_without_approval_never_calls_installer(self):
-        with patch.object(preflight, "install_missing_dependencies") as install,              patch.object(preflight, "print_report"):
+        with (
+            patch.object(preflight, "install_missing_dependencies") as install,
+            patch.object(preflight, "print_report"),
+        ):
             exit_code = preflight.main(["--install"])
         self.assertEqual(exit_code, 1)
         install.assert_not_called()
