@@ -28,7 +28,8 @@ class DependencyPreflightChecks(unittest.TestCase):
                                     capture_output=True, text=True, encoding="utf-8", timeout=30)
             report = json.loads(result.stdout)
             self.assertIn(report["status"], ("READY","ACTION_REQUIRED"))
-            self.assertEqual(Path(report["python"]["requirements_file"]), plugin/"requirements.txt")
+            self.assertEqual(Path(report["python"]["requirements_file"]).resolve(),
+                             (plugin/"requirements.txt").resolve())
             self.assertEqual(report["tectonic"]["status"], "NOT_REQUIRED")
 
     def test_installer_targets_managed_environment(self):
