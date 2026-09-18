@@ -1,7 +1,7 @@
 {
   "$id": "https://sf.education/sf-lecture-materials/contracts/a4/2.1.0",
   "schema_version": "2.1.0",
-  "source_golden_sha256": "333AC8285320A1CCE0D5EE1D3CFB0F8601C6D1B18377E034D249969C49E0BB55",
+  "source_golden_sha256": "9CF366F4D6341248BF1F502994316D9661617E54A896397BA754C33A071651EC",
   "rights_status": "CONFIRMED",
   "requirements": "A33-A45 and M01-M20 retained where compatible; approved study-guide, paragraph and LaTeX requirements 2026-09-12",
   "cover_title": {
@@ -109,6 +109,15 @@
     "bottom_mm": 283,
     "full_topic_names": true,
     "section_groups": "whole-if-fit-otherwise-repeat-heading",
+    "contents_style": {
+      "section": "white-two-digit-number-in-blue-circle-black-bold-title-gray-divider-below",
+      "topic": "blue-dot-blue-underlined-internal-link-hanging-continuation",
+      "page_label": "стр. N",
+      "page_label_placement": "gray-right-aligned-top-line-topic-only-measured-width",
+      "last_page_balance": "best-legal-whole-group-split-preserve-order",
+      "background": "plain-canvas-no-rail-no-pattern",
+      "reference_content": "never-copy-topic-count-titles-or-page-numbers"
+    },
     "fixed_point_max_passes": 3,
     "physical_page_numbers": true,
     "footer_top_mm": 278,

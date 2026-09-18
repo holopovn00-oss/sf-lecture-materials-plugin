@@ -26,6 +26,138 @@ from verify_candidate import check, check_workflow, checked
 PROFILE = PDF_ROOT / "references/adapters/a4/2.1.0.json"
 
 
+def layout_toc(structure, profile, page_number_width=None):
+    """Measured section groups, balanced final page, no orphaned headings."""
+    mm, pt = profile["layout_profile"]["mm"], profile["layout_profile"]["pt"]
+    bold = "SFHeadingInter"
+    start, bottom = mm["toc_top"]*MM, mm["toc_bottom"]*MM
+    available = bottom-start
+    number_width = max(mm["toc_number_field_min"]*MM, page_number_width or 0)
+    topic_width = (mm["toc_column_width"]-mm["toc_topic_text_offset"]-mm["toc_number_gap"])*MM-number_width
+    heading_width = (mm["toc_column_width"]-mm["toc_section_text_offset"])*MM
+    def head(topic, title):
+        lines = wrap(title, heading_width, pt["toc_section_size"], bold)
+        divider = max(mm["toc_badge_size"]*MM,
+                      len(lines)*pt["toc_section_leading"])+mm["toc_divider_gap"]*MM
+        return {"topic":topic,"lines":lines,"section_heading":True,
+                "divider_offset":divider,"height":divider+mm["toc_first_topic_gap"]*MM}
+    groups = []
+    for section in structure["sections"]:
+        topics = [t for t in structure["topics"] if t["section_id"] == section["section_id"]]
+        if not topics:
+            continue
+        entries = [head(topics[0], section["title"])]
+        for topic in topics:
+            lines = wrap(topic["title"], topic_width, pt["toc_topic_size"])
+            entries.append({"topic":topic,"lines":lines,"section_heading":False,
+                            "height":len(lines)*pt["toc_topic_leading"]+mm["toc_topic_gap"]*MM})
+        groups.append((section, entries))
+    columns, column, y = [], [], start
+    def flush():
+        nonlocal column, y
+        if column:
+            columns.append(column)
+        column, y = [], start
+    for section, entries in groups:
+        group_height = sum(e["height"] for e in entries)
+        if group_height <= available and y+group_height > bottom:
+            flush()
+        first = entries[0]
+        if y+first["height"]+entries[1]["height"] > bottom:
+            flush()
+        require(first["height"]+entries[1]["height"] <= available, "TOC heading and entry exceed column")
+        column.append({**first,"top":y})
+        y += first["height"]
+        for entry in entries[1:]:
+            if y+entry["height"] > bottom:
+                flush()
+                continued = head(entry["topic"],section["title"]+" (продолжение)")
+                require(continued["height"]+entry["height"] <= available,"TOC continuation exceeds column")
+                column.append({**continued,"top":y})
+                y += continued["height"]
+            column.append({**entry,"top":y})
+            y += entry["height"]
+        y += mm["toc_section_gap"]*MM
+    flush()
+    # Rebalance complete groups on the last page, retaining reading order.
+    last_start = ((len(columns)-1)//2)*2 if columns else 0
+    tail = [e for col in columns[last_start:] for e in col]
+    blocks = []
+    for entry in tail:
+        if entry["section_heading"]:
+            blocks.append([])
+        blocks[-1].append(entry)
+    gap = mm["toc_section_gap"]*MM
+    def block_height(items):
+        return sum(e["height"] for b in items for e in b)+max(0,len(items)-1)*gap
+    splits = [(abs(block_height(blocks[:i])-block_height(blocks[i:])),
+               -block_height(blocks[:i]),i) for i in range(1,len(blocks))
+              if max(block_height(blocks[:i]),block_height(blocks[i:])) <= available]
+    if splits:
+        split = min(splits)[2]
+        balanced = []
+        for half in (blocks[:split],blocks[split:]):
+            placed, y = [], start
+            for block in half:
+                for entry in block:
+                    placed.append({**entry,"top":y})
+                    y += entry["height"]
+                y += gap
+            balanced.append(placed)
+        columns[last_start:] = balanced
+    return [[{**e,"column":ci%2} for ci in range(i,min(i+2,len(columns))) for e in columns[ci]]
+            for i in range(0,len(columns),2)]
+
+
+def draw_toc_entries(canvas, entries, structure, destinations, profile, service):
+    """Draw the reference TOC; return clickable topic rectangles and destinations."""
+    from reportlab.lib.colors import HexColor
+    from reportlab.pdfbase import pdfmetrics
+    mm, pt = profile["layout_profile"]["mm"], profile["layout_profile"]["pt"]
+    tokens, height = profile["visual_tokens"], profile["surface"][1]*MM
+    links = []
+    for entry in entries:
+        x=(mm["toc_margin_x"]+entry["column"]*(mm["toc_column_width"]+mm["toc_column_gap"]))*MM
+        is_heading=entry["section_heading"]
+        leading=pt["toc_section_leading"] if is_heading else pt["toc_topic_leading"]
+        size=pt["toc_section_size"] if is_heading else pt["toc_topic_size"]
+        text_x=x+mm["toc_section_text_offset" if is_heading else "toc_topic_text_offset"]*MM
+        canvas.setFillColor(HexColor(tokens["brand"]))
+        if is_heading:
+            diameter=mm["toc_badge_size"]*MM
+            canvas.circle(x+diameter/2,height-entry["top"]-diameter/2,diameter/2,fill=1,stroke=0)
+            index=next(i for i,s in enumerate(structure["sections"]) if s["section_id"]==entry["topic"]["section_id"])
+            label=str(index+1).zfill(2)
+            service(label,x+(diameter-text_width(label,pt["toc_page_size"]))/2,
+                    entry["top"]+(diameter-pt["toc_page_size"])/2,pt["toc_page_size"],"#FFFFFF")
+            canvas.setStrokeColor(HexColor(tokens["border"]))
+            canvas.setLineWidth(pt["rule_width"])
+            line_y=height-entry["top"]-entry["divider_offset"]
+            canvas.line(x,line_y,x+mm["toc_column_width"]*MM,line_y)
+        else:
+            diameter=mm["toc_bullet_diameter"]*MM
+            canvas.circle(x+diameter/2,height-entry["top"]-size/2,diameter/2,fill=1,stroke=0)
+        boxes=[]
+        for i,line in enumerate(entry["lines"]):
+            top=entry["top"]+i*leading
+            boxes.append(service(line,text_x,top,size,"text" if is_heading else "brand",bold=is_heading))
+            if not is_heading:
+                canvas.setStrokeColor(HexColor(tokens["brand"]))
+                canvas.setLineWidth(.35)
+                underline_y=height-top-pdfmetrics.getAscent(FONT_NAME,size)-.8
+                canvas.line(text_x,underline_y,text_x+text_width(line,size),underline_y)
+        if not is_heading:
+            target=destinations[entry["topic"]["topic_id"]]
+            number="стр. "+str(target)
+            number_x=x+mm["toc_column_width"]*MM-text_width(number,pt["toc_page_size"])
+            require(max(b[2] for b in boxes)+mm["toc_number_gap"]*MM <= number_x+.1,
+                    "TOC topic overlaps page number")
+            service(number,number_x,entry["top"],pt["toc_page_size"],"muted")
+            links.append({"target_page":target,"bbox":[boxes[0][0],boxes[0][1],
+                          x+mm["toc_column_width"]*MM,boxes[-1][3]]})
+    return links
+
+
 def ref(path):
     path = Path(path).resolve()
     return {"path": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest().upper()}
@@ -198,50 +330,20 @@ def render(lecture_path, out, *, composition_path=None, handoff_path=None, workf
             assets[formula["formula_id"]] = ref(target / "math.json")
     pages = layout_body(lecture, composition, assets, profile, style)
     topics = lecture["structure"]["topics"]
-    # Content entries wrap using measured font metrics and may span multiple TOC pages.
-    toc_pages, toc, ty, tc = [], [], mm["toc_top"]*MM, 0
-    def next_toc_column():
-        nonlocal toc, tc, ty
-        if tc == 0:
-            tc = 1
-        else:
-            toc_pages.append(toc)
-            toc, tc = [], 0
-        ty = mm["toc_top"]*MM
-
-    for section in lecture["structure"]["sections"]:
-        section_topics = [t for t in topics if t["section_id"] == section["section_id"]]
-        if not section_topics:
-            continue
-        name_width = (mm["toc_column_width"]-mm["toc_number_field_min"]-mm["toc_number_gap"]-mm["toc_section_text_offset"])*MM
-        entries = []
-        for topic in section_topics:
-            lines = wrap(topic["title"],name_width,pt["toc_topic_size"])
-            entries.append({"topic":topic,"lines":lines,"section_heading":False,
-                            "height":len(lines)*pt["toc_topic_leading"]+mm["toc_topic_gap"]*MM})
-        heading = wrap(section["title"],name_width,pt["toc_section_size"],bold_font)
-        head_height = len(heading)*pt["toc_section_leading"]+mm["toc_first_topic_gap"]*MM
-        available = (mm["toc_bottom"]-mm["toc_top"])*MM
-        total_height = head_height+sum(e["height"] for e in entries)
-        if total_height <= available and ty+total_height > mm["toc_bottom"]*MM:
-            next_toc_column()
-        if ty+head_height+entries[0]["height"] > mm["toc_bottom"]*MM:
-            next_toc_column()
-        toc.append({"topic":section_topics[0],"lines":heading,"section_heading":True,"top":ty,"column":tc})
-        ty += head_height
-        for entry in entries:
-            require(head_height+entry["height"] <= available,"TOC heading and entry exceed column")
-            if ty+entry["height"] > mm["toc_bottom"]*MM:
-                next_toc_column()
-                continued=wrap(section["title"]+" (продолжение)",name_width,pt["toc_section_size"],bold_font)
-                toc.append({"topic":entry["topic"],"lines":continued,"section_heading":True,"top":ty,"column":tc})
-                ty += len(continued)*pt["toc_section_leading"]+mm["toc_first_topic_gap"]*MM
-                require(ty+entry["height"] <= mm["toc_bottom"]*MM,"TOC continuation exceeds column")
-            toc.append({**entry,"top":ty,"column":tc})
-            ty += entry["height"]
-        ty += mm["toc_section_gap"]*MM
-    if toc: toc_pages.append(toc)
-    offset = 1+len(toc_pages)
+    # Page-label width is measured before final TOC pagination; body destinations
+    # depend on the resulting TOC page count. No hard-coded page-number capacity.
+    number_width = mm["toc_number_field_min"]*MM
+    max_passes = json.loads((PDF_ROOT/"references"/profile["document_grammar_contract"]).read_text(
+        encoding="utf-8"))["navigation"]["fixed_point_max_passes"]
+    for _ in range(max_passes):
+        toc_pages = layout_toc(lecture["structure"], profile, number_width)
+        offset = 1+len(toc_pages)
+        required_width = text_width("стр. "+str(offset+len(pages)),pt["toc_page_size"])
+        if required_width <= number_width:
+            break
+        number_width = required_width
+    else:
+        raise ValueError("TOC page-label width did not converge; diagnose pagination without changing the reference style")
     destinations = {}
     for i, page in enumerate(pages, offset+1):
         for zone in page["zones"]:
@@ -336,30 +438,8 @@ def render(lecture_path, out, *, composition_path=None, handoff_path=None, workf
         current_number+=1
         internal()
         service("Содержание",mm["toc_margin_x"]*MM,mm["toc_title_y"]*MM,pt["topic_title_size"],bold=True)
-        for entry in entries:
-            x=(mm["toc_margin_x"]+entry["column"]*(mm["toc_column_width"]+mm["toc_column_gap"]))*MM
-            is_heading=entry["section_heading"]
-            leading=pt["toc_section_leading"] if is_heading else pt["toc_topic_leading"]
-            size=pt["toc_section_size"] if is_heading else pt["toc_topic_size"]
-            text_x=x+mm["toc_section_text_offset" if is_heading else "toc_topic_text_offset"]*MM
-            canvas.setFillColor(HexColor(tokens["brand"]))
-            if is_heading:
-                diameter=mm["toc_badge_size"]*MM
-                canvas.circle(x+diameter/2,height-entry["top"]-diameter/2,diameter/2,fill=1,stroke=0)
-                index=next(i for i,s in enumerate(lecture["structure"]["sections"]) if s["section_id"]==entry["topic"]["section_id"])
-                label=str(index+1).zfill(2)
-                service(label,x+(diameter-text_width(label,pt["toc_page_size"]))/2,
-                        entry["top"]+(diameter-pt["toc_page_size"])/2,pt["toc_page_size"],"#FFFFFF")
-            else:
-                diameter=mm["toc_bullet_diameter"]*MM
-                canvas.circle(x+diameter/2,height-entry["top"]-size/2,diameter/2,fill=1,stroke=0)
-            boxes=[service(line,text_x,entry["top"]+i*leading,size,"text" if is_heading else "brand",bold=is_heading)
-                   for i,line in enumerate(entry["lines"])]
-            target=destinations[entry["topic"]["topic_id"]]
-            number=str(target)
-            service(number,x+mm["toc_column_width"]*MM-text_width(number,pt["toc_page_size"]),entry["top"],pt["toc_page_size"])
-            box=[boxes[0][0],boxes[0][1],x+mm["toc_column_width"]*MM,boxes[-1][3]]
-            plan["links"].append({"page":current_number,"target_page":target,"bbox":box})
+        links = draw_toc_entries(canvas,entries,lecture["structure"],destinations,profile,service)
+        plan["links"].extend({"page":current_number,**link} for link in links)
         canvas.showPage()
     for page in pages:
         current_number+=1
