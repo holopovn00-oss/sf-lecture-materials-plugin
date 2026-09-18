@@ -16,7 +16,7 @@ EXPECTED_SKILLS = {
 
 
 def yaml_bool(text, key):
-    match = re.search(r"^\\s*" + re.escape(key) + r"\\s*:\\s*(true|false)\\s*$", text, re.MULTILINE)
+    match = re.search(r"^\s*" + re.escape(key) + r"\s*:\s*(true|false)\s*$", text, re.MULTILINE)
     if not match:
         raise AssertionError(f"Missing boolean {key}")
     return match.group(1) == "true"
@@ -29,7 +29,7 @@ class PluginMetadataChecks(unittest.TestCase):
         manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
         self.assertEqual(manifest["name"], "sf-lecture-materials")
         self.assertEqual(manifest["version"], "0.1.0")
-        self.assertEqual(manifest["skills"], ["./skills/"])
+        self.assertEqual(manifest["skills"], "./skills/")
 
     def test_marketplace_entry_resolves_to_the_only_manifest(self):
         marketplace = json.loads((REPO / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
@@ -47,7 +47,7 @@ class PluginMetadataChecks(unittest.TestCase):
         self.assertEqual(skill_dirs, set(EXPECTED_SKILLS))
         for name, implicit in EXPECTED_SKILLS.items():
             skill = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
-            declared = re.search(r"^name:\\s*([^\\s]+)\\s*$", skill, re.MULTILINE)
+            declared = re.search(r"^name:\s*([^\s]+)\s*$", skill, re.MULTILINE)
             self.assertIsNotNone(declared)
             self.assertEqual(declared.group(1), name)
             agent = (ROOT / "skills" / name / "agents/openai.yaml").read_text(encoding="utf-8")
