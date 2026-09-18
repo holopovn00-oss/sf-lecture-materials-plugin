@@ -85,7 +85,7 @@ class GoldenZoneChecks(unittest.TestCase):
         render_path.write_text(json.dumps(render_plan), encoding="utf-8")
         artifacts = {"pdf": ref(pdf), "profile": ref(self.profile), "render_plan": ref(render_path)}
         candidate = self.root / "candidate-manifest.json"
-        candidate.write_text(json.dumps({"schema_version": "2.0", "artifacts": artifacts}), encoding="utf-8")
+        candidate.write_text(json.dumps({"schema_version": "2.1", "artifacts": artifacts}), encoding="utf-8")
 
         top = 43 * MM_TO_PT
         bottom = 120 * MM_TO_PT

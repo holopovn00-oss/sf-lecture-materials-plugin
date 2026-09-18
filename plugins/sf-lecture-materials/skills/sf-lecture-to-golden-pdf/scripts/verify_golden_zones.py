@@ -92,7 +92,7 @@ def check(candidate_manifest_path, zone_plan_path):
     import fitz
 
     candidate = read_json(candidate_manifest_path)
-    require(candidate.get("schema_version") == "2.0", "Expected candidate manifest 2.0")
+    require(candidate.get("schema_version") == "2.1", "Expected candidate manifest 2.1")
     artifacts = candidate.get("artifacts")
     require(isinstance(artifacts, dict), "Missing candidate artifacts")
 

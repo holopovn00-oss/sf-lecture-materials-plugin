@@ -1,6 +1,6 @@
-# Проверка PDF: manifest 2.0 и LectureText 3.0.0
+# Проверка PDF: Candidate Manifest 2.1 и LectureText 3.0.0
 
-scripts/verify_candidate.py только читает файлы. Нужны Python 3.11+, PyMuPDF, Pillow и ReportLab (метрики Inter). Поддерживается manifest 2.0; устаревшие форматы отклоняются.
+scripts/verify_candidate.py только читает файлы. Нужны Python 3.11+, PyMuPDF, Pillow и ReportLab (метрики Inter). Поддерживается Candidate Manifest 2.1; устаревшие форматы отклоняются.
 
 Ревизия профиля layout_revision=2026-09-18 реализует красную строку 5 мм, нулевой дополнительный интервал между текстовыми абзацами и непрерывное размещение подтем. Формулы сохраняют отдельный зазор 4 мм. Проверка измеряет эти свойства в фактическом PDF; PDF_MECHANICS_VALIDATED не заменяет полный Golden Gate и ручную приемку.
 
@@ -30,10 +30,13 @@ scripts/pdf_flow.py — компонент основного текста: buil
 
 candidate-manifest.json:
 
-- schema_version: "2.0".
+- schema_version: "2.1".
 - artifacts: ровно pdf, lecture, composition, render_plan, profile.
 - lecture: полный проверенный LectureText 3.0.0; profile: закреплённый A4 2.1.0.
+- workflow: ровно {mode, full_cycle_handoff}. mode — "direct_skill" с null handoff либо "full_cycle" со ссылкой {kind:"full_cycle_handoff", path, sha256}.
 - text_review и visual_review: необязательные файловые ссылки или null.
+
+Для "full_cycle" verify_candidate.py запускает full-cycle handoff и требует статус FULL_CYCLE_FACT_CHECK_GATE_VALIDATED, а также равенство SHA-256 выбранного LectureText. Для "direct_skill" результат workflow — DIRECT_SKILL_NO_FACT_CHECK_GATE: это явно отдельный режим, а не утверждение о прохождении фактчека.
 
 render-plan.json:
 

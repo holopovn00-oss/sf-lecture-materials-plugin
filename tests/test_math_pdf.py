@@ -77,7 +77,9 @@ def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_
     refs = {"pdf": ref(pdf_path), "profile": ref(PDF_ROOT / "references/adapters/a4/2.1.0.json")}
     for name, value in (("lecture", lecture), ("composition", {"visuals": []}), ("render_plan", plan)):
         refs[name] = write(root / (name + ".json"), value)
-    manifest = {"schema_version": "2.0", "artifacts": refs, "text_review": None, "visual_review": None}
+    manifest = {"schema_version": "2.1", "artifacts": refs,
+                "workflow": {"mode": "direct_skill", "full_cycle_handoff": None},
+                "text_review": None, "visual_review": None}
     path = root / "manifest.json"
     write(path, manifest)
     return path, manifest, plan
