@@ -26,7 +26,7 @@ def write(path, value):
     return ref(path)
 
 
-def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_assets=None, service_heading=False, continuous=False, indent_extra=0):
+def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_assets=None, service_heading=False, continuous=False, indent_extra=0, ragged=False):
     from reportlab.pdfgen.canvas import Canvas
     profile = json.loads((PDF_ROOT / "references/adapters/a4/2.1.0.json").read_text(encoding="utf-8"))
     style = geometry(profile, PDF_ROOT)
@@ -53,6 +53,8 @@ def make_candidate(root, lecture, assets, *, right_offset=0, gap_extra=0, wrong_
         for col in range(2):
             layout = {**page, "columns": [page["columns"][0] if col == 0 else [], page["columns"][1] if col == 1 else []]}
             changed_style = {**style, "gap": style["gap"] + gap_extra, "indent": style["indent"] + indent_extra}
+            if ragged:
+                changed_style["justify"] = False
             rows = draw_body(canvas, layout, number, top + (right_offset if col else 0), changed_style, assets)
             for name in ("text", "math", "flow"):
                 plan[name].extend(rows[name])
@@ -121,9 +123,40 @@ class MathPdfChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "formula occurrence"):
             PDF.check(path)
 
+    def test_ragged_body_is_rejected(self):
+        lecture = copy.deepcopy(self.lecture)
+        lecture["blocks"][0]["content"][0]["runs"] = [{"type":"text", "text":"Длинный учебный абзац с пояснением условия и результата. "*12}]
+        lecture["content_hash"] = H.digest({k:v for k,v in lecture.items() if k != "content_hash"})
+        path, _, _ = make_candidate(self.root, lecture, self.assets, ragged=True)
+        with self.assertRaisesRegex(ValueError, "justification"):
+            PDF.check(path)
+
     def test_wrong_first_line_indent_is_rejected(self):
         path, _, _ = make_candidate(self.root, self.lecture, self.assets, indent_extra=-2)
         with self.assertRaisesRegex(ValueError, "indent"):
+            PDF.check(path)
+
+    def hyphen_candidate(self):
+        lecture = copy.deepcopy(self.lecture)
+        value = "Рабочий документ содержит последовательность действий и объяснение результата. " * 12
+        lecture["blocks"][0]["content"][0]["runs"] = [{"type":"text","text":value}]
+        lecture["content_hash"] = H.digest({k:v for k,v in lecture.items() if k != "content_hash"})
+        path, manifest, plan = make_candidate(self.root, lecture, self.assets)
+        return path, manifest, plan, value
+
+    def test_layout_hyphens_preserve_exact_source_ranges(self):
+        path, _, plan, value = self.hyphen_candidate()
+        rows = [r for r in plan["text"] if r.get("block_id") == "b1" and r.get("content_index") == 0]
+        self.assertEqual("".join(r["text"] for r in rows), value)
+        self.assertTrue(any(r.get("hyphen") for r in rows))
+        self.assertEqual(PDF.check(path)["status"], "PDF_MECHANICS_VALIDATED")
+
+    def test_unreported_printed_hyphen_is_rejected(self):
+        path, manifest, plan, _ = self.hyphen_candidate()
+        next(r for r in plan["text"] if r.get("hyphen"))["hyphen"] = False
+        manifest["artifacts"]["render_plan"] = write(self.root/"render_plan.json",plan)
+        write(path,manifest)
+        with self.assertRaisesRegex(ValueError,"Missing or extra actual body glyph"):
             PDF.check(path)
 
     def test_continuous_topics_with_actual_headings(self):
@@ -202,7 +235,7 @@ class MathPdfChecks(unittest.TestCase):
         lecture = copy.deepcopy(self.lecture)
         for i in range(14):
             lecture["blocks"][0]["content"].append({"type": "paragraph", "runs": [{"type": "text", "text":
-                ("Long control paragraph preserves its complete text and its precise source order. " * 8) + str(i)}]})
+                ("Контрольный абзац сохраняет полный текст и точную последовательность исходных фрагментов. " * 8) + str(i)}]})
         lecture["content_hash"] = H.digest({k: v for k, v in lecture.items() if k != "content_hash"})
         path, _, plan = make_candidate(self.root, lecture, self.assets)
         result = PDF.check(path)

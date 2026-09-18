@@ -3,7 +3,12 @@
   "$id": "https://sf.education/sf-lecture-materials/adapters/a4/2.1.0",
   "adapter_id": "sf-a4-pdf",
   "version": "2.1.0",
-  "layout_revision": "2026-09-17",
+  "layout_revision": "2026-09-18",
+  "text_alignment": "justify-last-left",
+  "hyphenation": "ru-RU-layout-only",
+  "max_word_space_ratio": 3,
+  "min_word_space_ratio": 0.7,
+  "column_top": "first-visible-content",
   "mode": "a4",
   "orientation": "portrait",
   "surface": [
@@ -17,7 +22,7 @@
   "powerpoint_runtime": false,
   "rights_status": "CONFIRMED",
   "document_grammar_contract": "contracts/a4/document-golden-gate-2.1.0.json",
-  "document_grammar_sha256": "7F87E45BB64DAEE42C325562ACD05BACF6D5834A4C371F27CFC57B43582807F7",
+  "document_grammar_sha256": "724908BB763B9F671AACEA79B02DFC8EB6F3E2B67B1F3967C046D78C17C94D3C",
   "font": {
     "family": "Inter",
     "delivery": "external-verified",
@@ -246,5 +251,21 @@
     "overflow": "explicit-aligned-expression-or-blocker",
     "no_scaling": true,
     "compiled_asset_padding_pt": 2
+  },
+  "topic_bar": {
+    "pill_height_mm": 5,
+    "pill_radius_mm": 2.5,
+    "pill_padding_mm": 2.5,
+    "right_edge_mm": 196,
+    "text_gap_mm": 1,
+    "line_width_pt": 0.75,
+    "layout": "title-left-rule-middle-time-pill-right-full-content-width",
+    "title_size_pt": 11,
+    "title_leading_pt": 14,
+    "long_title": "wrap-without-font-reduction",
+    "line_clearance_mm": 3,
+    "title_time_reserved_gap_mm": 8,
+    "missing_time": "omit-pill-never-invent",
+    "keep_with_body_lines": 2
   }
 }

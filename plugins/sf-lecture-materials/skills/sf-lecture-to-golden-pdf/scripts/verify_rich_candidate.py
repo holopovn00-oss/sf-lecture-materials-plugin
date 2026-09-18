@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lecture_content import VERSION, block_text, formula_items, require
 from latex_math import checked_file, glyphs, placed_matches, validate_asset
-from pdf_flow import allowed_break, best_split, boundary_gap, content_key, extent, geometry, text_width, topic_heading
+from pdf_flow import allowed_break, best_split, boundary_gap, content_key, extent, geometry, text_width, topic_heading, line_parts, valid_hyphen
 
 
 def read(path):
@@ -134,18 +134,33 @@ def check_current(manifest_path, media_check, reports_check):
             require(isinstance(origin, list) and len(origin) == 2
                     and all(type(v) in {int, float} and math.isfinite(v) for v in origin), "Missing text origin")
             actual = glyphs(page, rect)
-            characters = [(i, c) for i, c in enumerate(expected) if not c.isspace()]
+            word_space, trim = row.get("word_space", 0), row.get("trim_tail", 0)
+            require(type(word_space) in {int, float} and math.isfinite(word_space)
+                    and word_space >= (style.get("min_space_ratio",1)-1)*text_width(" ",style["size"])-.001
+                    and type(trim) is int and 0 <= trim <= len(expected), "Invalid text spacing metadata")
+            painted = expected[:len(expected)-trim] if trim else expected
+            require(not trim or expected[len(expected)-trim:].isspace(), "Trimmed non-whitespace source text")
+            hyphen = row.get("hyphen", False)
+            require(type(hyphen) is bool, "Invalid hyphen flag")
+            if hyphen:
+                require(style.get("hyphenate") and trim == 0 and valid_hyphen(run_text[key], end),
+                        "Unapproved discretionary hyphen")
+                painted += "-"
+                page_expected[row["page"]-1].update("-")
+            characters = [(i, c) for i, c in enumerate(painted) if not c.isspace()]
             require(len(actual) == len(characters), "Missing or extra actual body glyph")
             for char, (offset, value) in zip(actual, characters):
                 require(char["c"] == value and "Inter" in char["font"] and abs(char["size"] - style["size"]) < 0.05,
                         "Body glyph, font or size differs")
-                require(abs(char["origin"][0] - origin[0] - text_width(expected[:offset], style["size"])) <= 0.2
+                require(abs(char["origin"][0] - origin[0] - text_width(expected[:offset], style["size"])
+                            - expected[:offset].count(" ") * word_space) <= 0.2
                         and abs(char["origin"][1] - origin[1]) <= 0.2, "Body text origin or spacing differs from the actual PDF")
-            width = text_width(expected, style["size"])
+            width = text_width(painted, style["size"]) + painted.count(" ") * word_space
             box = [origin[0], origin[1] - style["ascent"], origin[0] + width, origin[1] + style["descent"]]
             require(max(abs(a - b) for a, b in zip(rect, box)) <= 0.2, "Body text box differs from measured font metrics")
             item["parts"].append({"type": "text", "run_index": key[2], "start": start, "end": end,
-                                  "left": origin[0], "baseline": origin[1], "width": width, "text": expected})
+                                  "left": origin[0], "baseline": origin[1], "width": width, "text": expected,
+                                  "word_space": word_space, "trim_tail": trim, "hyphen": hyphen})
         require(observed_runs == list(run_text) and all(cursors[k] == len(v) for k, v in run_text.items()),
                 "Text runs incomplete or reordered")
         for row in math_rows:
@@ -177,6 +192,7 @@ def check_current(manifest_path, media_check, reports_check):
                               if bool(doc.extract_font(f[0])[3])}
             require(used_fonts <= embedded_fonts, "PDF font is not embedded")
         measured = []
+        seen_columns = set()
         seen_topics = set()
         previous_order = None
         for item in indexed.values():
@@ -196,6 +212,17 @@ def check_current(manifest_path, media_check, reports_check):
                     x += style["indent"]
                 require(all(p["run_index"] is not None for p in parts), "Display math inside a text line")
                 parts.sort(key=lambda p: (p["run_index"], p.get("start", 0)))
+                require(not any(p.get("hyphen") for p in parts[:-1])
+                        and (not parts[-1].get("hyphen") or row["line_index"]+1 < line_counts[key]),
+                        "Discretionary hyphen must end a non-final paragraph line")
+                require(abs(parts[0]["left"] - x) <= .2, "Body first-line indent differs")
+                expected_parts = line_parts(parts, row["line_index"], line_counts[key], style)
+                for actual_part, expected_part in zip(parts, expected_parts):
+                    if actual_part["type"] == "text":
+                        require(abs(actual_part["word_space"] - expected_part.get("word_space", 0)) < .001
+                                and actual_part["trim_tail"] == expected_part.get("trim_tail", 0),
+                                "Body justification or paragraph-final alignment differs")
+                        require(abs(actual_part["width"] - expected_part["width"]) < .2, "Justified width differs")
                 baseline = parts[0]["baseline"]
                 require(all(abs(p["baseline"] - baseline) <= 0.2 for p in parts), "Inline formula baseline differs from text")
                 for part in parts:
@@ -219,12 +246,18 @@ def check_current(manifest_path, media_check, reports_check):
                             and abs(h["origin"][1] - (top + style["heading_gap"] + j*style["heading_leading"]
                                 + pdfmetrics.getAscent(FONT_NAME, style["heading_size"]))) < .2,
                             "Topic heading placement differs")
+            heading_top_gap = style["heading_gap"] if row.get("topic_heading") and style.get("trim_heading_top") else 0
+            column_key = (row["page"], row["column"])
+            first_trim = heading_top_gap if column_key not in seen_columns else 0
+            top += first_trim
+            seen_columns.add(column_key)
             seen_topics.add(row["flow_id"])
-            require(top >= 0 and top + line_height <= style["bottom"] + 0.2, "Body content exceeds vertical frame")
+            require(top >= 0 and top + line_height - first_trim <= style["bottom"] + 0.2, "Body content exceeds vertical frame")
             order = (row["page"], row["column"], top)
             require(previous_order is None or order > previous_order, "Body flow is physically repeated or reordered")
             previous_order = order
             measured.append({**row, "top": top, "height": line_height, "ascent": ascent,
+                             "heading_top_gap": heading_top_gap,
                              "math_gap": style["math_gap"] if row["kind"] == "display_math" else 0,
                              "paragraph_lines": line_counts[key]})
         pairs = {}
@@ -247,7 +280,7 @@ def check_current(manifest_path, media_check, reports_check):
                 for unit in units:
                     y += boundary_gap(previous, unit, style["gap"])
                     require(abs(unit["top"] - y) <= 0.2, "Paragraph gap, line spacing or column top differs from actual content")
-                    y += unit["height"]
+                    y += unit["height"] - (unit.get("heading_top_gap", 0) if previous is None else 0)
                     previous = unit
             together = columns[0] + columns[1]
             optimum = best_split(together, style["bottom"] - top, style)

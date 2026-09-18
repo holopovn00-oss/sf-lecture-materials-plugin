@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 import re
+from functools import lru_cache
 
 from lecture_content import formula_items, require
 from latex_math import checked_file, validate_asset
@@ -39,6 +40,11 @@ def geometry(profile, skill_root):
             "heading_size": pt.get("subtopic_title_size", 11),
             "heading_leading": pt.get("subtopic_title_leading", 14),
             "heading_gap": mm["heading_gap"] * MM,
+            "justify": profile.get("text_alignment") == "justify-last-left",
+            "hyphenate": profile.get("hyphenation") == "ru-RU-layout-only",
+            "max_space_ratio": profile.get("max_word_space_ratio", float("inf")),
+            "min_space_ratio": profile.get("min_word_space_ratio", 1),
+            "trim_heading_top": profile.get("column_top") == "first-visible-content",
             "x": [mm["content_x"] * MM, mm["column_second_x"] * MM],
             "bottom": mm["content_bottom"] * MM, "height": profile["surface"][1] * MM,
             "short_lines": profile["pagination"]["short_paragraph_max_lines"],
@@ -47,6 +53,84 @@ def geometry(profile, skill_root):
 
 def content_key(unit):
     return unit["block_id"], unit["content_index"]
+
+
+@lru_cache(maxsize=4096)
+def russian_breaks(token):
+    """Only ordinary Russian words; never URLs, formulae, codes or acronyms."""
+    match = re.fullmatch(r'([«(]*)([А-Яа-яЁё]+)([»),.;:!?]*\s*)', token)
+    if not match or match[2].isupper():
+        return ()
+    try:
+        import pyphen
+    except ImportError as error:
+        raise ValueError("Russian hyphenation requires pyphen==0.17.2; install requirements.txt") from error
+    word = match[2]
+    vowels = set("аеёиоуыэюя")
+    return tuple(len(match[1])+int(p) for p in pyphen.Pyphen(lang="ru_RU", left=2, right=2).positions(word)
+                 if not p.data and vowels.intersection(word[:p].lower()) and vowels.intersection(word[p:].lower()))
+
+
+def valid_hyphen(source, offset):
+    """Validate a layout hyphen against the entire original whitespace token."""
+    for match in re.finditer(r"\S+", source):
+        if match.start() < offset < match.end():
+            return offset-match.start() in russian_breaks(match[0])
+    return False
+
+
+def wrap_atoms(atoms, style):
+    """Choose paragraph-wide breaks within hard word-space limits."""
+    chunks = []
+    for atom in atoms:
+        if atom["type"] != "text":
+            chunks.append(dict(atom))
+            continue
+        start = atom["start"]
+        for end in [*atom.get("hyphen_points", ()), atom["end"]]:
+            value = atom["text"][start-atom["start"]:end-atom["start"]]
+            chunks.append({**atom,"start":start,"end":end,"text":value,
+                           "width":text_width(value,style["size"]),
+                           "break_hyphen":end != atom["end"]})
+            start = end
+    widths, spaces = [0.0], [0]
+    for chunk in chunks:
+        widths.append(widths[-1]+chunk["width"])
+        spaces.append(spaces[-1]+chunk.get("text","").count(" "))
+    count, space_width = len(chunks), text_width(" ",style["size"])
+    costs, cuts = {count:0.0}, {}
+    for start in range(count-1,-1,-1):
+        available = style["width"]-(style["indent"] if start == 0 else 0)
+        options = []
+        for end in range(start+1,count+1):
+            last = chunks[end-1]
+            value = last.get("text","")
+            trim = value[len(value.rstrip()):]
+            nspaces = spaces[end]-spaces[start]-trim.count(" ")
+            hyphen = last.get("break_hyphen",False)
+            natural = widths[end]-widths[start]-text_width(trim,style["size"])+(text_width("-",style["size"]) if hyphen else 0)
+            delta = available-natural
+            extra = delta/nspaces if nspaces else 0
+            if natural-(1-style["min_space_ratio"])*nspaces*space_width > available+.001:
+                break
+            if end not in costs or (not nspaces and end < count and abs(delta) > .2):
+                continue
+            if end < count and extra > (style["max_space_ratio"]-1)*space_width+.001:
+                continue
+            penalty = (extra/space_width)**2 if end < count else (max(0,-extra)/space_width)**2
+            options.append((penalty + (.4 if hyphen else 0) + costs[end], -end, end))
+        if options:
+            cost, _, end = min(options)
+            costs[start], cuts[start] = cost, end
+    require(0 in cuts, "No safe paragraph layout within Russian hyphenation and word-space limits")
+    lines, start = [], 0
+    while start < count:
+        end = cuts[start]
+        line = [{**chunk,"hyphen":False} for chunk in chunks[start:end]]
+        line[-1]["hyphen"] = line[-1].get("break_hyphen",False)
+        lines.append(line)
+        start = end
+    return lines
 
 
 def topic_heading(title, style):
@@ -74,13 +158,45 @@ def boundary_gap(previous, current, gap):
 
 
 def extent(units, gap):
-    total = 0.0
+    total = -units[0].get("heading_top_gap", 0) if units else 0.0
     previous = None
     for unit in units:
         total += boundary_gap(previous, unit, gap)
         total += unit["height"]
         previous = unit
     return total
+
+
+def line_parts(parts, line_index, paragraph_lines, style):
+    """Compute painted widths without changing source text or run ranges."""
+    result = [dict(p) for p in parts]
+    if not style.get("justify"):
+        for part in result:
+            if part["type"] == "text":
+                part["word_space"] = 0
+                part["painted"] = part["text"] + ("-" if part.get("hyphen") else "")
+                part["width"] = text_width(part["painted"], style["size"])
+        return result
+    for i, part in enumerate(result):
+        if part["type"] == "text":
+            painted = part["text"].rstrip() if i == len(result)-1 else part["text"]
+            part["trim_tail"] = len(part["text"])-len(painted)
+            painted += "-" if part.get("hyphen") else ""
+            part["painted"] = painted
+            part["width"] = text_width(painted, style["size"])
+    available = style["width"] - (style["indent"] if line_index == 0 else 0)
+    natural = sum(p["width"] for p in result)
+    spaces = sum(p.get("painted", "").count(" ") for p in result)
+    extra = (available-natural)/spaces if spaces and (line_index+1 < paragraph_lines or natural > available) else 0
+    require(extra >= (style.get("min_space_ratio",1)-1)*text_width(" ",style["size"]) - .001,
+            "Word spacing would be compressed beyond the allowed limit")
+    require(extra <= (style.get("max_space_ratio", float("inf"))-1)*text_width(" ",style["size"]) + .001,
+            "Excessive word spacing; no acceptable justified line break")
+    for part in result:
+        if part["type"] == "text":
+            part["word_space"] = extra
+            part["width"] += part["painted"].count(" ") * extra
+    return result
 
 
 def allowed_break(units, cut, style):
@@ -137,7 +253,7 @@ def paginate(units, capacity, style):
     while cursor < len(units):
         tail, max_end = units[cursor:], 0
         for end in range(1, len(tail) + 1):
-            if extent(tail[:end], style["gap"]) > 2 * capacity + style["gap"] + 0.1:
+            if extent(tail[:end], style["gap"]) > 2 * capacity + style["gap"] + style["heading_gap"] + 0.1:
                 break
             max_end = end
         found = None
@@ -191,6 +307,12 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                     for match in re.finditer(r"\S+\s*|\s+", run["text"]):
                         # Split a single overlong word without adding a hyphen.
                         start, end = match.span()
+                        if style.get("hyphenate"):
+                            value = run["text"][start:end]
+                            atoms.append({"type":"text","run_index":ri,"start":start,"end":end,
+                                          "text":value,"width":text_width(value,style["size"]),
+                                          "hyphen_points":[start+p for p in russian_breaks(value)]})
+                            continue
                         while start < end:
                             stop = end
                             while stop > start + 1 and text_width(run["text"][start:stop], style["size"]) > style["width"] - style["indent"]:
@@ -200,7 +322,7 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                                           "text": value, "width": text_width(value, style["size"])})
                             start = stop
             lines, line, width = [], [], 0.0
-            for atom in atoms:
+            for atom in ([] if style.get("hyphenate") else atoms):
                 available = style["width"] - (style["indent"] if not lines else 0)
                 require(line or atom["width"] <= available + 0.001,
                         "An inline element exceeds the indented first line; use an explicit display formula")
@@ -211,6 +333,11 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                 width += atom["width"]
             if line:
                 lines.append(line)
+            if style.get("hyphenate"):
+                try:
+                    lines = wrap_atoms(atoms, style)
+                except ValueError as error:
+                    raise ValueError(f"{error}; block={common['block_id']}, content_index={ci}") from error
             for li, line in enumerate(lines):
                 parts = []
                 for atom in line:
@@ -218,13 +345,14 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                         parts[-1]["end"] = atom["end"]
                         parts[-1]["text"] += atom["text"]
                         parts[-1]["width"] += atom["width"]
+                        parts[-1]["hyphen"] = atom.get("hyphen", False)
                     else:
                         parts.append(dict(atom))
                 ascent = max([style["ascent"]] + [p["ascent"] for p in parts if p["type"] == "math"])
                 descent = max([style["descent"]] + [p["height"] - p["ascent"] for p in parts if p["type"] == "math"])
                 units.append({**common, "kind": "line", "parts": parts, "line_index": li,
                               "paragraph_lines": len(lines), "height": max(style["leading"], ascent + descent),
-                              "ascent": ascent, "width": sum(p["width"] for p in parts)})
+                              "ascent": ascent, "width": sum(p["width"] for p in line_parts(parts, li, len(lines), style))})
     require(units, "No content for the requested topic")
     if not isinstance(topic_id, str):
         titles = {t["topic_id"]: t["title"] for t in lecture["structure"]["topics"]}
@@ -234,6 +362,7 @@ def build_units(lecture, topic_id, assets, profile, skill_root):
                 seen.add(unit["flow_id"])
                 unit["heading"] = topic_heading(titles[unit["flow_id"]], style)
                 unit["height"] += unit["heading"]["height"]
+                unit["heading_top_gap"] = style["heading_gap"] if style.get("trim_heading_top") else 0
     return units
 
 
@@ -244,6 +373,8 @@ def draw_body(canvas, page_layout, page_number, top, style, assets):
     canvas.setFillColorRGB(0.2, 0.2, 0.2)
     for column, units in enumerate(page_layout["columns"], 1):
         y, previous = top, None
+        if units:
+            y -= units[0].get("heading_top_gap", 0)
         for unit in units:
             y += boundary_gap(previous, unit, style["gap"])
             line_id = f"{unit['block_id']}:{unit['content_index']}:{unit['line_index']}"
@@ -274,11 +405,19 @@ def draw_body(canvas, page_layout, page_number, top, style, assets):
             else:
                 if unit["line_index"] == 0:
                     x += style["indent"]
-                for part in unit["parts"]:
+                for part in line_parts(unit["parts"], unit["line_index"], unit["paragraph_lines"], style):
                     if part["type"] == "text":
-                        canvas.drawString(x, style["height"] - baseline, part["text"])
+                        text_object = canvas.beginText(x, style["height"] - baseline)
+                        text_object.setFont(FONT_NAME, style["size"])
+                        text_object.setWordSpace(part.get("word_space", 0))
+                        text_object.textOut(part.get("painted", part["text"]))
+                        text_object.setWordSpace(0)
+                        canvas.drawText(text_object)
                         plan["text"].append({**common, "run_index": part["run_index"], "start": part["start"], "end": part["end"],
                                              "text": part["text"], "origin": [x, baseline],
+                                             "word_space": part.get("word_space", 0),
+                                             "hyphen": part.get("hyphen", False),
+                                             "trim_tail": part.get("trim_tail", 0),
                                              "bbox": [x - 0.03, baseline - style["ascent"] - 0.05,
                                                       x + part["width"] + 0.03, baseline + style["descent"] + 0.05]})
                     else:
