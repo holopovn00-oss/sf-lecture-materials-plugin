@@ -11,6 +11,15 @@ description: Use when an already prepared lecture text must become an SF Educati
 
 Если материалов или результата ещё нет, используй общий вход только для полного цикла. Прямой запрос PDF из готового текста не запускает повторную редактуру или внешний фактчек и не заявляет прохождение полного цикла.
 
+## Обязательная проверка PDF-среды
+
+Сразу при прямом вызове PDF-навыка выполни `python <plugin-root>/scripts/dependency_preflight.py --json`.
+
+- `READY`: зафиксируй готовность и переходи к входу.
+- `ACTION_REQUIRED`: покажи только отсутствующие компоненты и попроси явное «установить зависимости». Не создавай черновик PDF и не запускай установку до ответа.
+- После подтверждения выполни `python <plugin-root>/scripts/dependency_preflight.py --install --approve-install --json`; к PDF переходи только при новом `READY`.
+- `BLOCKED`: сообщи точную причину. Не подменяй Tectonic TeX Live или другим движком.
+
 ## Принять вход
 
 1. Используй готовый LectureText 3.0.0: lecture-text.json, source-blocks.json, source-manifest.json и text-review.json. Это единственная редакция текста; абзацы и LaTeX находятся внутри JSON. Сверь хеши, охват проверки и открытые вопросы.
