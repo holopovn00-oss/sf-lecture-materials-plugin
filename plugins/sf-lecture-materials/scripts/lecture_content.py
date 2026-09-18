@@ -156,8 +156,6 @@ def validate_content(blocks):
 
 def block_text(block):
     """Deterministic search/review projection; never a second editable source."""
-    if "content" not in block:
-        return block["text"]
     parts = []
     for item in block["content"]:
         if item["type"] == "display_math":

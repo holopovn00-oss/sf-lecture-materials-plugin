@@ -1,19 +1,10 @@
-"""Real PDF regressions: unequal columns, spacing tricks and false plan labels."""
-import hashlib
-import importlib.util
+"""Current-format real PDF checks, including navigation and protected text."""
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
-ROOT = (Path(__file__).resolve().parents[1] / 'plugins/sf-lecture-materials/skills')
-spec = importlib.util.spec_from_file_location('balance_candidate', ROOT/'sf-lecture-to-golden-pdf/scripts/verify_candidate.py')
-PDF = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(PDF)
-
-
-def ref(path):
-    return {'path': str(path.resolve()), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest().upper()}
+from test_math_pdf import H, PDF, fixture, make_candidate, ref, write
 
 
 class ColumnBalanceChecks(unittest.TestCase):
@@ -21,86 +12,171 @@ class ColumnBalanceChecks(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        sources, draft = fixture(self.root / "source.json")
+        self.text = "Рабочий документ содержит последовательность действий и объяснение результата. " * 12
+        draft["blocks"][0]["content"] = [
+            {"type": "paragraph", "runs": [{"type": "text", "text": self.text}]},
+            {"type": "paragraph", "runs": [{"type": "text", "text": "Условия и исходные ограничения сохраняются при проверке результата. " * 5}]},
+        ]
+        self.lecture, _ = H.build(sources, draft)
 
-    def candidate(self, left=3, right=3, right_leading=13.1, right_offset=0, split_blocks=False, false_column=False, metadata=True):
-        from reportlab.pdfgen.canvas import Canvas
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        pdfmetrics.registerFont(TTFont('BalanceTest', str(ROOT/'sf-lecture-to-golden-pdf/assets/fonts/Inter-Regular.ttf')))
-        M = 72/25.4
-        pdf_path = self.root/'candidate.pdf'
-        c = Canvas(str(pdf_path), pagesize=(210*M, 297*M))
-        c.setFont('BalanceTest', 9.5)
-        chunks = [f'Sentence number {i+1}. ' for i in range(left+right)]
-        blocks = ([{'text_block_id': 'b1', 'text': ''.join(chunks[:left])}, {'text_block_id': 'b2', 'text': ''.join(chunks[left:])}]
-                  if split_blocks else [{'text_block_id': 'b1', 'text': ''.join(chunks)}])
-        lecture = {'title': 'Example', 'blocks': blocks, 'structure': {'topics': [{'topic_id': 'topic'}], 'placements': [{'text_block_id': b['text_block_id'], 'topic_id': 'topic'} for b in blocks]}}
-        plan = {'pages': 1, 'text': [], 'visuals': [], 'links': [], 'bookmarks': []}
-        cursors = {b['text_block_id']: 0 for b in blocks}
-        for i, chunk in enumerate(chunks):
-            col = 1 if i < left else 2
-            row_index = i if col == 1 else i-left
-            x = (22 if col == 1 else 112)*M
-            baseline = 100 + row_index*(13.1 if col == 1 else right_leading) + (right_offset if col == 2 else 0)
-            c.drawString(x, 297*M-baseline, chunk.strip())
-            identifier = 'b2' if split_blocks and col == 2 else 'b1'
-            start = cursors[identifier]
-            row = {'page': 1, 'bbox': [x-0.2, baseline-10, x+84*M+0.2, baseline+3], 'text': chunk, 'block_id': identifier, 'start': start, 'end': start+len(chunk)}
-            if metadata:
-                row.update(column=1 if false_column else col, flow_id='topic')
-            plan['text'].append(row)
-            cursors[identifier] += len(chunk)
-        c.save()
-        refs = {'pdf': ref(pdf_path), 'profile': ref(ROOT/'sf-lecture-to-golden-pdf/references/adapters/a4/2.0.0.json')}
-        for key, data in [('lecture', lecture), ('render_plan', plan), ('composition', {'visuals': []})]:
-            path = self.root/(key+'.json')
-            path.write_text(json.dumps(data), encoding='utf-8')
-            refs[key] = ref(path)
-        path = self.root/'manifest.json'
-        path.write_text(json.dumps({'schema_version': '1.0', 'artifacts': refs}), encoding='utf-8')
-        return path
+    def candidate(self, **kwargs):
+        self.path, self.manifest, self.plan = make_candidate(self.root, self.lecture, {}, **kwargs)
+        return self.path
 
-    def test_balanced_columns_report_actual_lines(self):
+    def reseal_plan(self):
+        self.manifest["artifacts"]["render_plan"] = write(self.root / "render_plan.json", self.plan)
+        write(self.path, self.manifest)
+
+    def check(self):
+        write(self.path, self.manifest)
+        return PDF.check(self.path)
+
+    def test_balanced_current_pdf_preserves_text_and_review_boundary(self):
         result = PDF.check(self.candidate())
-        self.assertIn('column_balance', result, 'Actual column balance is not checked')
-        self.assertEqual(result['column_balance'], 'VALIDATED')
-        self.assertEqual(result['column_pairs'][0]['line_counts'], [3, 3])
+        self.assertEqual(result["status"], "PDF_MECHANICS_VALIDATED")
+        self.assertEqual(result["column_balance"], "VALIDATED")
+        self.assertEqual(result["visual_review"], "NOT_RECORDED")
+        self.assertEqual(result["semantic_review"], "NOT_EVALUATED_BY_SCRIPT")
+        rows = [r for r in self.plan["text"] if r.get("content_index") == 0 and r.get("block_id") == "b1"]
+        self.assertEqual("".join(r["text"] for r in rows), self.text)
 
-    def test_odd_line_count_keeps_extra_line_on_left(self):
-        result = PDF.check(self.candidate(left=3, right=2))
-        self.assertIn('column_pairs', result, 'Actual column balance is not checked')
-        self.assertEqual(result['column_pairs'][0]['line_counts'], [3, 2])
-
-    def test_two_source_blocks_share_one_balanced_topic(self):
-        result = PDF.check(self.candidate(split_blocks=True))
-        self.assertIn('column_pairs', result, 'Actual column balance is not checked')
-        self.assertEqual(len(result['column_pairs']), 1)
-        self.assertEqual(result['column_pairs'][0]['line_counts'], [3, 3])
-
-    def test_unequal_columns_rejected_despite_complete_text(self):
-        with self.assertRaisesRegex(ValueError, 'Unbalanced columns'):
-            PDF.check(self.candidate(left=4, right=2))
-
-    def test_empty_right_column_rejected_for_multiline_text(self):
-        with self.assertRaisesRegex(ValueError, 'Unbalanced columns'):
-            PDF.check(self.candidate(left=6, right=0))
-
-    def test_stretched_line_spacing_cannot_fake_balance(self):
-        with self.assertRaisesRegex(ValueError, 'Body line spacing'):
-            PDF.check(self.candidate(right_leading=16.1))
+    def test_legacy_manifest_rejected(self):
+        self.candidate()
+        self.manifest["schema_version"] = "1.0"
+        with self.assertRaisesRegex(ValueError, "Unsupported candidate manifest"):
+            self.check()
 
     def test_lowered_right_column_rejected(self):
-        with self.assertRaisesRegex(ValueError, 'Column tops'):
+        with self.assertRaises(ValueError):
             PDF.check(self.candidate(right_offset=13.1))
 
-    def test_column_labels_must_match_actual_pdf_positions(self):
-        with self.assertRaisesRegex(ValueError, 'Column label'):
-            PDF.check(self.candidate(false_column=True))
+    def test_wrong_first_line_indent_rejected(self):
+        with self.assertRaises(ValueError):
+            PDF.check(self.candidate(indent_extra=-2))
 
-    def test_missing_layout_metadata_cannot_skip_check(self):
-        with self.assertRaisesRegex(ValueError, 'Missing body layout metadata'):
-            PDF.check(self.candidate(metadata=False))
+    def test_ragged_columns_rejected(self):
+        with self.assertRaises(ValueError):
+            PDF.check(self.candidate(ragged=True))
+
+    def test_stretched_spacing_rejected(self):
+        with self.assertRaises(ValueError):
+            PDF.check(self.candidate(gap_extra=4))
+
+    def test_false_column_metadata_rejected(self):
+        self.candidate()
+        for row in self.plan["flow"]:
+            row["column"] = 1
+        self.reseal_plan()
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_missing_layout_metadata_rejected(self):
+        self.candidate()
+        del self.plan["flow"][0]["column"]
+        self.reseal_plan()
+        with self.assertRaises((ValueError, KeyError)):
+            self.check()
+
+    def test_missing_character_rejected(self):
+        self.candidate()
+        row = next(r for r in self.plan["text"] if r.get("block_id"))
+        row["end"] -= 1
+        row["text"] = row["text"][:-1]
+        self.reseal_plan()
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_pdf_bytes_tampering_rejected(self):
+        self.candidate()
+        with (self.root / "candidate.pdf").open("ab") as stream:
+            stream.write(b"\n% changed\n")
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_resealed_pdf_with_extra_text_rejected(self):
+        import fitz
+        self.candidate()
+        extra = self.root / "extra.pdf"
+        with fitz.open(self.root / "candidate.pdf") as doc:
+            doc[0].insert_text((30, 30), "unplanned duplicate")
+            doc.save(extra)
+        self.manifest["artifacts"]["pdf"] = ref(extra)
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_resealed_pdf_with_missing_text_rejected(self):
+        import fitz
+        self.candidate()
+        broken = self.root / "missing.pdf"
+        row = next(r for r in self.plan["text"] if r.get("block_id"))
+        with fitz.open(self.root / "candidate.pdf") as doc:
+            page = doc[row["page"] - 1]
+            page.add_redact_annot(fitz.Rect(row["bbox"]))
+            page.apply_redactions()
+            doc.save(broken)
+        self.manifest["artifacts"]["pdf"] = ref(broken)
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_unrendered_visual_rejected(self):
+        from PIL import Image
+        self.candidate()
+        image = self.root / "visual.png"
+        Image.new("RGB", (20, 10), "blue").save(image)
+        composition = {"visuals": [{"visual_id": "v1", "image": ref(image), "source": ref(image),
+            "text_block_ids": ["b1"], "caption": "Blue example", "role": "Example"}]}
+        self.manifest["artifacts"]["composition"] = write(self.root / "composition.json", composition)
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_nonexistent_navigation_rejected(self):
+        self.candidate()
+        self.plan["links"] = [{"page": 1, "bbox": [20, 20, 40, 40], "target_page": 1}]
+        self.reseal_plan()
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_real_navigation_and_wrong_target(self):
+        import fitz
+        self.candidate()
+        linked = self.root / "linked.pdf"
+        with fitz.open(self.root / "candidate.pdf") as doc:
+            doc[0].insert_link({"kind": fitz.LINK_GOTO, "from": fitz.Rect(20, 20, 40, 40), "page": 0})
+            doc.save(linked)
+        self.manifest["artifacts"]["pdf"] = ref(linked)
+        self.plan["links"] = [{"page": 1, "bbox": [20, 20, 40, 40], "target_page": 1}]
+        self.reseal_plan()
+        self.assertEqual(self.check()["links"], 1)
+        self.plan["links"][0]["target_page"] = 999
+        self.reseal_plan()
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_direct_fit_destination_uses_real_page_object(self):
+        import fitz
+        from reportlab.pdfgen.canvas import Canvas
+        path = self.root / "fit.pdf"
+        canvas = Canvas(str(path))
+        canvas.bookmarkPage("first")
+        canvas.linkRect("", "second", (20, 20, 40, 40), thickness=0)
+        canvas.showPage()
+        canvas.bookmarkPage("second")
+        canvas.showPage()
+        canvas.save()
+        with fitz.open(path) as doc:
+            link = doc[0].get_links()[0]
+            self.assertEqual(PDF.internal_link_target(doc, link), 1)
+            doc.xref_set_key(link["xref"], "Dest", f"[{doc.page_xref(0)} 0 R /Fit]")
+            self.assertNotEqual(PDF.internal_link_target(doc, link), 1)
+
+    def test_visual_review_bound_to_exact_pdf(self):
+        self.candidate()
+        self.manifest["visual_review"] = write(self.root / "visual-review.json",
+            {"pdf_sha256": "0" * 64, "pages": []})
+        with self.assertRaises(ValueError):
+            self.check()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

@@ -23,10 +23,10 @@ class HandoffTests(unittest.TestCase):
             {"source_block_id": "s3", "text": "Рассмотрим пример.", "source_uri": "part-2.srt", "start_ms": 0, "end_ms": 3000},
         ]
         self.draft = {
-            "folder_id": "lecture-001", "title": "Тестовая лекция",
+            "schema_version": "3.0.0", "folder_id": "lecture-001", "title": "Тестовая лекция",
             "blocks": [
-                {"text_block_id": "t1", "text": self.sources[0]["text"], "source_block_ids": ["s1"], "perspective": "lecturer_direct"},
-                {"text_block_id": "t2", "text": self.sources[2]["text"], "source_block_ids": ["s3"], "perspective": "lecturer_direct"},
+                {"text_block_id": "t1", "content": [{"type": "paragraph", "runs": [{"type": "text", "text": self.sources[0]["text"]}]}], "source_block_ids": ["s1"]},
+                {"text_block_id": "t2", "content": [{"type": "paragraph", "runs": [{"type": "text", "text": self.sources[2]["text"]}]}], "source_block_ids": ["s3"]},
             ],
             "transformation_ledger": [{"source_block_id": "s2", "disposition": "removed_nonsemantic", "reason": "Проверка микрофона"}],
             "structure": {
@@ -40,42 +40,41 @@ class HandoffTests(unittest.TestCase):
         }
 
     def test_build_preserves_text_and_local_timestamps(self):
-        document, sources = self.module._build_legacy(self.sources, self.draft)
+        document, sources = self.module.build(self.sources, self.draft)
         self.module.check(sources, document)
-        markdown = self.module.to_markdown(document)
-        for block in self.draft["blocks"]:
-            self.assertEqual(markdown.count(block["text"]), 1)
+        self.assertEqual(document["blocks"], self.draft["blocks"])
+        self.assertEqual(document["structure"]["placements"][1]["timestamp_range"], "00:00:00 — 00:00:03")
         self.assertEqual(document["source_locators"]["t2"][0]["start_ms"], 0)
         self.assertTrue(document["assertions"]["semantic_review_required"])
 
     def test_missing_source_blocks_completion(self):
         self.draft["blocks"].pop()
         with self.assertRaises(ValueError):
-            self.module._build_legacy(self.sources, self.draft)
+            self.module.build(self.sources, self.draft)
 
     def test_duplicate_anchor_blocks_completion(self):
         self.draft["blocks"][1]["source_block_ids"] = ["s1", "s3"]
         with self.assertRaises(ValueError):
-            self.module._build_legacy(self.sources, self.draft)
+            self.module.build(self.sources, self.draft)
 
     def test_reordered_blocks_are_rejected(self):
         self.draft["blocks"].reverse()
         with self.assertRaises(ValueError):
-            self.module._build_legacy(self.sources, self.draft)
+            self.module.build(self.sources, self.draft)
 
     def test_substantive_removal_is_rejected(self):
         self.sources[1]["substantive"] = True
         with self.assertRaises(ValueError):
-            self.module._build_legacy(self.sources, self.draft)
+            self.module.build(self.sources, self.draft)
 
     def test_duplicate_placement_is_rejected(self):
         self.draft["structure"]["placements"].append(copy.deepcopy(self.draft["structure"]["placements"][0]))
         with self.assertRaises(ValueError):
-            self.module._build_legacy(self.sources, self.draft)
+            self.module.build(self.sources, self.draft)
 
     def test_changed_sealed_text_is_rejected(self):
-        document, sources = self.module._build_legacy(self.sources, self.draft)
-        document["blocks"][0]["text"] = "15%."
+        document, sources = self.module.build(self.sources, self.draft)
+        document["blocks"][0]["content"][0]["runs"][0]["text"] = "15%."
         with self.assertRaises(ValueError):
             self.module.check(sources, document)
 
@@ -85,7 +84,7 @@ class HandoffTests(unittest.TestCase):
             target.mkdir()
             sentinel = target / "keep.txt"
             sentinel.write_text("original", encoding="utf-8")
-            document, sources = self.module._build_legacy(self.sources, self.draft)
+            document, sources = self.module.build(self.sources, self.draft)
             with self.assertRaises(FileExistsError):
                 self.module.write_package(target, sources, document)
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "original")

@@ -22,7 +22,7 @@
   "powerpoint_runtime": false,
   "rights_status": "CONFIRMED",
   "document_grammar_contract": "contracts/a4/document-golden-gate-2.1.0.json",
-  "document_grammar_sha256": "724908BB763B9F671AACEA79B02DFC8EB6F3E2B67B1F3967C046D78C17C94D3C",
+  "document_grammar_sha256": "00D91A5C6B89F0D0AA9F1BA216E5D8709510ED805FE0028A0F3A6FC7C5ADEA4C",
   "font": {
     "family": "Inter",
     "delivery": "external-verified",
@@ -46,11 +46,11 @@
       "sha256": "DF156292B6594114F1FD31C2A2AAE9FECB0A22CFD4918376F16C913107D29638"
     },
     "cover_pattern": {
-      "path": "assets/a4/cover-pattern-2.0.0.png",
+      "path": "assets/a4/cover-pattern.png",
       "sha256": "DEADAF51B588EC5A6311C5118A5308E7E3964328D31B2658E8D0337DCCBB97A0"
     },
     "internal_pattern": {
-      "path": "assets/a4/internal-pattern-2.0.0.png",
+      "path": "assets/a4/internal-pattern.png",
       "sha256": "FDBF71ABA7D5134876DCEEFABEE3081C7472D34ACF875FDA999E2E828B659464"
     }
   },

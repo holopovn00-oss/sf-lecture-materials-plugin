@@ -1,38 +1,18 @@
 # Документация SF Lecture Materials
 
-Текущий выпуск — **0.4.1**. Для новой работы используйте документы ниже. Инструкции запуска, редактура, фактчек и PDF входят в одну поставку плагина.
+Текущая версия плагина — **0.1.0**. В рабочей поставке остаются только актуальные инструкции, ресурсы и проверки.
 
-| Назначение | Актуальный документ |
+| Назначение | Документ |
 |---|---|
-| Возможности и начало работы | [README репозитория](../README.md) |
-| Установка, обновление и откат | [UPDATING.md](UPDATING.md) |
-| Изменения текущего выпуска | [RELEASE-0.4.1.md](RELEASE-0.4.1.md) |
-| Технические проверки текущего выпуска | [validation-0.4.1.json](validation-0.4.1.json) |
-| Общий запуск и последовательность этапов | [sf-lecture-materials](../plugins/sf-lecture-materials/skills/sf-lecture-materials/SKILL.md) |
-| Редактура транскрипта | [sf-transcript-to-lecture](../plugins/sf-lecture-materials/skills/sf-transcript-to-lecture/SKILL.md) |
-| Фактологическая проверка | [sf-fact-check](../plugins/sf-lecture-materials/skills/sf-fact-check/SKILL.md) |
-| Вёрстка и проверка PDF | [sf-lecture-to-golden-pdf](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/SKILL.md) |
+| Возможности и начало работы | [README](../README.md) |
+| Подключение и обновление | [UPDATING.md](UPDATING.md) |
+| Общий запуск | [sf-lecture-materials](../plugins/sf-lecture-materials/skills/sf-lecture-materials/SKILL.md) |
+| Редактура | [sf-transcript-to-lecture](../plugins/sf-lecture-materials/skills/sf-transcript-to-lecture/SKILL.md) |
+| Фактчек | [sf-fact-check](../plugins/sf-lecture-materials/skills/sf-fact-check/SKILL.md) |
+| PDF | [sf-lecture-to-golden-pdf](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/SKILL.md) |
+| Правила Golden Gate | [golden-rules.md](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/references/golden-rules.md) |
+| Принятый эталон | [golden-accepted.json](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/references/golden-accepted.json) |
 
-## Версии компонентов
+Версия плагина 0.1.0 не заменяет версии независимых форматов: LectureText 3.0.0, FactCheck 1.0.0, text-review и candidate-manifest 2.0, профиль/контракт A4 2.1.0. Происхождение ресурсов сохранено в provenance и лицензиях; исторические пути там не являются исполняемыми зависимостями.
 
-Номер выпуска плагина не заменяет версии форматов и происхождения ресурсов.
-
-| Компонент | Действующее значение |
-|---|---|
-| Плагин и поле plugin_version в manifest ресурсов | 0.4.1 |
-| LectureText | 3.0.0 |
-| FactCheck | 1.0.0 |
-| text-review и candidate-manifest | 2.0 |
-| Профиль и контракт A4 | 2.1.0 |
-| Источник исторически перенесённых SF-ресурсов | SF Lecture Publisher 2.0.5 |
-
-Файлы форматов 2.0.0 и проверки прежних пакетов сохранены для совместимости. Исходные Golden PDF, изображения и шрифты закреплены хешами; их даты и номера не меняются при обновлении инструкций. Marketplace направляет установщик к текущему manifest плагина и не дублирует номер версии. requirements.txt описывает совместимые диапазоны библиотек; старое время последнего коммита само по себе не требует обновления зависимостей.
-
-В списке GitHub рядом с файлом или папкой отображается последний коммит, затронувший этот путь. Надпись `Package SF Lecture Materials 0.1.0` означает дату и сообщение изменения этого пути; установленная версия определяется manifest плагина.
-
-## История выпусков
-
-- [0.4.0: общий запуск и решения по фактчеку](RELEASE-0.4.0.md), [проверки этого выпуска](validation-0.4.0.json).
-- [0.3.0: отдельный фактологический навык](RELEASE-0.3.0.md), [проверки этого выпуска](validation-0.3.0.json).
-
-Исторические отчёты не удостоверяют последующие изменения. Теги фиксируют выпущенные версии; удаление уже объединённых рабочих веток не удаляет коммиты из main или теги.
+История изменений остается в Git. Старые файлы поставки и ветки совместимости удалены из текущего дерева; отчеты прежних запусков не удостоверяют новую редакцию. Marketplace не дублирует версию плагина: ее источник — .codex-plugin/plugin.json.

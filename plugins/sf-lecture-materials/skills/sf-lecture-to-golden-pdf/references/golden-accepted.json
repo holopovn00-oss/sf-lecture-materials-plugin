@@ -2,19 +2,14 @@
   "schema_version": "golden-acceptance/1.0",
   "accepted_on": "2026-09-18",
   "user_decision": "принято, меняй гитхаб",
-  "version": "v4",
+  "version": "0.1.0",
   "pdf": "../assets/golden/golden.pdf",
   "sha256": "333AC8285320A1CCE0D5EE1D3CFB0F8601C6D1B18377E034D249969C49E0BB55",
   "pages": 28,
-  "supersedes": {
-    "sha256": "0188F5614446EEBAD7ED5A1CCD54448B8B27E3E99B8242B85BAC1BD0501DA949",
-    "pages": 31,
-    "pdf": "../assets/golden/golden-legacy-31p.pdf"
-  },
   "profile": "adapters/a4/2.1.0.json",
-  "profile_sha256": "6A1EF9D0481C2F3A4F6621B1A5AB5BF684D37C845D5E395D8BD4B1A9EBEE707B",
+  "profile_sha256": "2BDEE0FE3C7BC814C29D67654F876F25349156279291B1B91C05EC0420C55C91",
   "contract": "contracts/a4/document-golden-gate-2.1.0.json",
-  "contract_sha256": "724908BB763B9F671AACEA79B02DFC8EB6F3E2B67B1F3967C046D78C17C94D3C",
+  "contract_sha256": "00D91A5C6B89F0D0AA9F1BA216E5D8709510ED805FE0028A0F3A6FC7C5ADEA4C",
   "targeted_checks": {
     "A4": 28,
     "rendered": 28,
@@ -93,6 +88,5 @@
       "P080": 4.1
     },
     "global_max_unchanged": 3
-  },
-  "content_changed_from_v3": false
+  }
 }
