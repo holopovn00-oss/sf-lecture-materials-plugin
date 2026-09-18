@@ -2,3 +2,5 @@ interface:
   display_name: "SF Lecture Materials: начать работу"
   short_description: "Материалы, выбор результата и этапы подготовки"
   default_prompt: "Используй $sf-lecture-materials: проверь добавленные материалы, учти уже указанный результат и предложи подходящий процесс только при отсутствии выбора."
+policy:
+  allow_implicit_invocation: true

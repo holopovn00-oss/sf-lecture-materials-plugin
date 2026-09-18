@@ -21,6 +21,14 @@ TECTONIC = os.environ.get("SF_TECTONIC") or shutil.which("tectonic")
 CACHE = os.environ.get("SF_TECTONIC_CACHE")
 
 
+class ReleaseGateChecks(unittest.TestCase):
+    def test_release_validation_requires_tectonic(self):
+        if os.environ.get("SF_RELEASE_VALIDATION") != "1":
+            self.skipTest("Full TeX gate is required only for release validation")
+        self.assertTrue(TECTONIC and Path(TECTONIC).is_file(),
+                        "Release validation requires an executable Tectonic")
+
+
 def write(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
     return ref(path)

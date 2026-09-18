@@ -70,3 +70,18 @@ visual-review.json содержит pdf_sha256 и все pages по порядк
 text_review ссылается на отчёт текстового навыка. Проверяются SHA-256 выбранного JSON и выполненные решения text/title/formula. Полный пакет и история решений отдельно проверяются handoff.py check-package.
 
 Успех — PDF_MECHANICS_VALIDATED и column_balance=VALIDATED, код 0. Ошибка — BLOCKED и код 1. semantic_review/manual_acceptance остаются NOT_EVALUATED_BY_SCRIPT, golden_gate — NOT_CERTIFIED_BY_THIS_CHECKER. Технический статус не принимает образец и не разрешает перенос/публикацию.
+
+
+## Многозонная композиция Golden Gate
+
+Для принятой композиции с полноширинной строкой «название — линия — время» и последующим двухколоночным потоком общий `verify_candidate.py` остаётся базовой проверкой кандидата, но не удостоверяет саму форму зон. Локальный рендерер обязан дополнительно сохранить `golden-zone-plan.json` по [контракту 1.0](contracts/a4/golden-zone-plan-1.0.0.json).
+
+План ссылается на те же фактические PDF, профиль A4 и render-plan, что и candidate manifest, по абсолютным путям и SHA-256. Для каждой зоны он содержит страницу, `topic_id`, геометрию названия, линии и плашки времени, две физические колонки, точные `line_id` основного текста и решение по балансу. Статус `BEST_LEGAL_SPLIT` допустим только при непустых обеих колонках; `INDIVISIBLE_CONTENT` требует объяснения.
+
+После базовой проверки выполни:
+
+~~~powershell
+python scripts/verify_golden_zones.py --candidate-manifest C:/Task/candidate-manifest.json --zone-plan C:/Task/golden-zone-plan.json
+~~~
+
+Успех `GOLDEN_ZONE_MECHANICS_VALIDATED` подтверждает механическую геометрию именно этих зон и адресный поток текста. Он не заменяет `PDF_MECHANICS_VALIDATED`, проверку смысла, визуальный просмотр страниц или ручную приёмку.

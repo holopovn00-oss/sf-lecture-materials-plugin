@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sf.education/sf-lecture-materials/contracts/a4/golden-zone-plan/1.0.0",
+  "schema_version": "1.0",
+  "title": "Golden Gate multi-zone plan",
+  "description": "Addressable geometry and flow record for full-width topic dividers followed by symmetric two-column content zones. This record complements, and does not replace, candidate-manifest 2.0.",
+  "type": "object",
+  "required": ["schema_version", "artifacts", "zones"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "artifacts": {
+      "type": "object",
+      "required": ["pdf", "profile", "render_plan"],
+      "properties": {
+        "pdf": {"$ref": "#/$defs/file_ref"},
+        "profile": {"$ref": "#/$defs/file_ref"},
+        "render_plan": {"$ref": "#/$defs/file_ref"}
+      },
+      "additionalProperties": false
+    },
+    "zones": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/zone"}
+    }
+  },
+  "$defs": {
+    "file_ref": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9A-Fa-f]{64}$"}
+      },
+      "additionalProperties": true
+    },
+    "bbox": {
+      "type": "array",
+      "items": {"type": "number"},
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "column": {
+      "type": "object",
+      "required": ["column", "bbox", "line_ids"],
+      "properties": {
+        "column": {"enum": [1, 2]},
+        "bbox": {"$ref": "#/$defs/bbox"},
+        "line_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "zone": {
+      "type": "object",
+      "required": ["zone_id", "page", "topic_id", "divider", "columns", "balance"],
+      "properties": {
+        "zone_id": {"type": "string", "minLength": 1},
+        "page": {"type": "integer", "minimum": 1},
+        "topic_id": {"type": "string", "minLength": 1},
+        "divider": {
+          "type": "object",
+          "required": ["title_text", "title_bbox", "rule_bbox", "time_pill_bbox"],
+          "properties": {
+            "title_text": {"type": "string", "minLength": 1},
+            "title_bbox": {"$ref": "#/$defs/bbox"},
+            "rule_bbox": {"$ref": "#/$defs/bbox"},
+            "time_pill_bbox": {
+              "anyOf": [{"$ref": "#/$defs/bbox"}, {"type": "null"}]
+            }
+          },
+          "additionalProperties": false
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/column"}
+        },
+        "balance": {
+          "type": "object",
+          "required": ["status", "reason"],
+          "properties": {
+            "status": {"enum": ["BEST_LEGAL_SPLIT", "INDIVISIBLE_CONTENT"]},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
