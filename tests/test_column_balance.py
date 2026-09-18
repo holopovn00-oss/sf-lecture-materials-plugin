@@ -167,8 +167,18 @@ class ColumnBalanceChecks(unittest.TestCase):
         with fitz.open(path) as doc:
             link = doc[0].get_links()[0]
             self.assertEqual(PDF.internal_link_target(doc, link), 1)
+            # MuPDF versions expose /Fit as GOTO or NAMED. Exercise the
+            # named representation explicitly against the actual PDF object.
+            named = {**link, "kind": fitz.LINK_NAMED, "view": "Fit", "page": "2"}
+            self.assertEqual(PDF.internal_link_target(doc, named), 1)
             doc.xref_set_key(link["xref"], "Dest", f"[{doc.page_xref(0)} 0 R /Fit]")
-            self.assertNotEqual(PDF.internal_link_target(doc, link), 1)
+            self.assertIsNone(PDF.internal_link_target(doc, named))
+            changed = self.root / "changed-fit.pdf"
+            doc.save(changed)
+        # Reload after mutation: a previously extracted GOTO dictionary is
+        # a snapshot, not a live view of the annotation.
+        with fitz.open(changed) as doc:
+            self.assertEqual(PDF.internal_link_target(doc, doc[0].get_links()[0]), 0)
 
     def test_visual_review_bound_to_exact_pdf(self):
         self.candidate()
