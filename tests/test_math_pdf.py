@@ -19,6 +19,15 @@ PDF = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(PDF)
 TECTONIC = os.environ.get("SF_TECTONIC") or shutil.which("tectonic")
 CACHE = os.environ.get("SF_TECTONIC_CACHE")
+ALLOW_RELEASE_DOWNLOADS = os.environ.get("SF_RELEASE_VALIDATION") == "1"
+
+
+class ReleaseGateChecks(unittest.TestCase):
+    def test_release_validation_requires_tectonic(self):
+        if os.environ.get("SF_RELEASE_VALIDATION") != "1":
+            self.skipTest("Full TeX gate is required only for release validation")
+        self.assertTrue(TECTONIC and Path(TECTONIC).is_file(),
+                        "Release validation requires an executable Tectonic")
 
 
 def write(path, value):
@@ -98,7 +107,7 @@ class MathPdfChecks(unittest.TestCase):
             for _, ri, formula in formula_items(block):
                 target = cls.cache_root / formula["formula_id"]
                 compile_math(formula["latex"], "display" if ri is None else "inline", 9.5, target,
-                             tectonic=TECTONIC, cache_dir=CACHE)
+                             tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
                 cls.assets[formula["formula_id"]] = ref(target / "math.json")
 
     def setUp(self):
@@ -245,7 +254,7 @@ class MathPdfChecks(unittest.TestCase):
     def test_tex_syntax_error_has_no_success_receipt(self):
         target = self.root / "syntax-error"
         with self.assertRaisesRegex(ValueError, "compilation failed"):
-            compile_math(r"\frac{1}", "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE)
+            compile_math(r"\frac{1}", "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
         self.assertFalse((target / "math.json").exists())
 
     def test_math_vocabulary_is_really_typeset(self):
@@ -254,7 +263,7 @@ class MathPdfChecks(unittest.TestCase):
         for i, latex in enumerate(expressions):
             with self.subTest(latex=latex):
                 target = self.root / f"vocabulary-{i}"
-                receipt = compile_math(latex, "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE)
+                receipt = compile_math(latex, "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
                 self.assertEqual(receipt["syntax"], "COMPILED")
                 validate_asset(latex, "display", 9.5, ref(target / "math.json"))
 
