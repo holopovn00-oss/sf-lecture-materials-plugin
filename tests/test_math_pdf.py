@@ -254,7 +254,7 @@ class MathPdfChecks(unittest.TestCase):
     def test_tex_syntax_error_has_no_success_receipt(self):
         target = self.root / "syntax-error"
         with self.assertRaisesRegex(ValueError, "compilation failed"):
-            compile_math(r"\frac{1}", "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE)
+            compile_math(r"\frac{1}", "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
         self.assertFalse((target / "math.json").exists())
 
     def test_math_vocabulary_is_really_typeset(self):
@@ -263,7 +263,7 @@ class MathPdfChecks(unittest.TestCase):
         for i, latex in enumerate(expressions):
             with self.subTest(latex=latex):
                 target = self.root / f"vocabulary-{i}"
-                receipt = compile_math(latex, "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE)
+                receipt = compile_math(latex, "display", 9.5, target, tectonic=TECTONIC, cache_dir=CACHE, allow_downloads=ALLOW_RELEASE_DOWNLOADS)
                 self.assertEqual(receipt["syntax"], "COMPILED")
                 validate_asset(latex, "display", 9.5, ref(target / "math.json"))
 
