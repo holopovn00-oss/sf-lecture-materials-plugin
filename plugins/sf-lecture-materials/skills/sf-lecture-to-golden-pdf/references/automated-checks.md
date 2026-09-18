@@ -12,7 +12,7 @@ scripts/verify_candidate.py только читает файлы. Нужны Pyt
 python scripts/latex_math.py --latex '\\mathrm{EAR}=\\left(1+\\frac{r}{m}\\right)^m-1' --mode display --size 9.5 --out 'C:/Task/math/ear' --tectonic 'C:/Tools/tectonic.exe' --cache-dir 'C:/Task/tectonic-cache'
 ~~~
 
-Путь Tectonic также можно передать через SF_TECTONIC. По умолчанию используется --only-cached; --allow-downloads явно разрешает пополнение кэша задачи, когда это входит в разрешённое получение зависимостей. Не требуется установка полного TeX или изменение установленного плагина. При отсутствии движка/ресурса сообщи конкретный блокер. Установка системы TeX автоматически не запускается.
+Перед запуском PDF-навыка выполни scripts/dependency_preflight.py --json. Резолвер выбирает Tectonic в порядке: явный --tectonic, SF_TECTONIC, PATH, встроенный Codex LaTeX runtime, затем ранее установленный managed runtime. По умолчанию используется --only-cached и общий managed cache. Если не хватает Python-пакетов, Tectonic или его кэша, preflight возвращает ACTION_REQUIRED; скачивание и установка возможны только после явного подтверждения пользователя через --install --approve-install. Полный TeX Live не является заменой Tectonic и автоматически не устанавливается.
 
 Помощник принимает ограниченное математическое выражение, запускает Tectonic в --untrusted, ограничивает компиляцию 45 секундами и не перезаписывает существующий неполный результат. Неудача оставляет диагностический лог, но не успешный math.json. Успех создаёт vector math.pdf, math.json, исходный служебный math.tex и логи. Эти файлы являются материалами сборки, а не дополнительной редакцией лекционного текста.
 

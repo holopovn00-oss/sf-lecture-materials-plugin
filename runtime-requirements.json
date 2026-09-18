@@ -1,0 +1,41 @@
+{
+  "schema_version": "0.1.0",
+  "python": {
+    "minimum_version": "3.11",
+    "requirements_file": "requirements.txt",
+    "packages": [
+      {
+        "distribution": "PyMuPDF",
+        "import": "fitz",
+        "specifier": ">=1.24,<2",
+        "purpose": "PDF extraction, rendering and verification"
+      },
+      {
+        "distribution": "Pillow",
+        "import": "PIL",
+        "specifier": ">=10,<13",
+        "purpose": "image and raster QA"
+      },
+      {
+        "distribution": "reportlab",
+        "import": "reportlab",
+        "specifier": ">=4,<6",
+        "purpose": "A4 text and layout rendering"
+      },
+      {
+        "distribution": "pyphen",
+        "import": "pyphen",
+        "specifier": "==0.17.2",
+        "purpose": "Russian hyphenation"
+      }
+    ]
+  },
+  "runtime": {
+    "tectonic": {
+      "minimum_version": "0.15.0",
+      "managed_version": "0.17.0",
+      "purpose": "trusted vector compilation of bounded LaTeX formulas",
+      "cache": "managed Codex runtime cache, never the installed plugin directory"
+    }
+  }
+}

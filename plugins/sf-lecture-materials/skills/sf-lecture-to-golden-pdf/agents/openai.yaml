@@ -1,6 +1,6 @@
 interface:
   display_name: "SF: JSON → Golden Gate PDF"
   short_description: "A4 PDF с абзацами и проверенными формулами LaTeX"
-  default_prompt: "Используй $sf-lecture-to-golden-pdf для создания PDF из готового JSON, сохраняя смысловые абзацы, формулы LaTeX и полное содержание."
+  default_prompt: "Используй $sf-lecture-to-golden-pdf для PDF из готового JSON. Сначала выполни dependency_preflight; при ACTION_REQUIRED запроси подтверждение установки и не создавай PDF до READY. Сохраняй смысловые абзацы, формулы LaTeX и полное содержание."
 policy:
   allow_implicit_invocation: false

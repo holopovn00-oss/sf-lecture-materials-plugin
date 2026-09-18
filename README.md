@@ -33,9 +33,16 @@
 Для локальной структурной проверки из корня репозитория выполните:
 
 ~~~powershell
-python -m pip install -r requirements.txt
+# Проверка ничего не скачивает и не устанавливает.
+python plugins/sf-lecture-materials/scripts/dependency_preflight.py --json
+
+# Только после явного подтверждения пользователя, если preflight вернул ACTION_REQUIRED:
+python plugins/sf-lecture-materials/scripts/dependency_preflight.py --install --approve-install --json
+
 python -m unittest discover -s tests -v
 ~~~
+
+Python-пакеты перечислены в [requirements.txt](requirements.txt); Tectonic и его кэш — в [runtime-requirements.json](runtime-requirements.json). Tectonic не ставится через pip. Сценарий сначала использует встроенный runtime Codex и загружает закрепленный официальный бинарник с проверкой SHA-256 только после подтвержденной установки.
 
 Для изменений PDF-контура используйте [GitHub-gates](docs/GITHUB_GOVERNANCE.md). Полный PDF-релиз требует отдельной визуальной и ручной проверки.
 

@@ -1,7 +1,8 @@
 """Compile anchored math expressions with Tectonic and verify placed vector math.
 
-The default is offline. A caller explicitly enables downloads to populate its
-own TeX cache. No TeX installation, plugin cache or user configuration is edited.
+The default is offline. A caller explicitly enables downloads to populate the
+managed TeX cache. Tectonic discovery is shared with dependency_preflight.py;
+the renderer itself never installs a runtime or edits plugin files.
 """
 from __future__ import annotations
 
@@ -12,9 +13,9 @@ import math
 import os
 from pathlib import Path
 import re
-import shutil
 import subprocess
 
+from dependency_preflight import default_tectonic_cache_dir, resolve_tectonic
 from lecture_content import digest, latex_digest, require, validate_latex
 
 RENDERER_VERSION = "1.0"
@@ -74,8 +75,10 @@ def compile_math(latex, mode, size_pt, out, *, tectonic=None, cache_dir=None,
         require(receipt.get("recipe") == recipe, "Cached math belongs to a different expression or style")
         validate_asset(latex, mode, size_pt, file_ref(receipt_path))
         return receipt
-    executable = tectonic or os.environ.get("SF_TECTONIC") or shutil.which("tectonic")
-    require(executable and Path(executable).is_file(), "Tectonic is unavailable; pass --tectonic or set SF_TECTONIC")
+    resolution = resolve_tectonic(tectonic)
+    require(resolution is not None,
+            "Tectonic is unavailable; run dependency_preflight.py --json, then approve its proposed installation")
+    executable = resolution["path"]
     out.mkdir(parents=True, exist_ok=False)
     source_path = out / "math.tex"
     source_path.write_text(source, encoding="utf-8")
@@ -88,7 +91,7 @@ def compile_math(latex, mode, size_pt, out, *, tectonic=None, cache_dir=None,
     if cache_dir:
         env["TECTONIC_CACHE_DIR"] = str(Path(cache_dir).resolve())
     else:
-        env["TECTONIC_CACHE_DIR"] = str(out.parent / "tectonic-cache")
+        env["TECTONIC_CACHE_DIR"] = str(default_tectonic_cache_dir().resolve())
     try:
         process = subprocess.run(command, cwd=out, env=env, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", timeout=timeout)
@@ -97,7 +100,8 @@ def compile_math(latex, mode, size_pt, out, *, tectonic=None, cache_dir=None,
     (out / "compile.log").write_text(process.stdout, encoding="utf-8")
     pdf = out / "math.pdf"
     require(process.returncode == 0 and pdf.is_file(),
-            f"LaTeX compilation failed (code {process.returncode}); see {out / 'compile.log'}")
+            f"LaTeX compilation failed (code {process.returncode}); see {out / 'compile.log'}; "
+            "run dependency_preflight.py --json to check the TeX cache")
     log = (out / "math.log").read_text(encoding="utf-8", errors="replace")
     require("Missing character:" not in log and "Overfull" not in log, "LaTeX has missing glyphs or overflow")
     metrics = re.search(r"SFBOX:([0-9.]+)pt;([0-9.]+)pt;([0-9.]+)pt", log)

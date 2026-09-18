@@ -43,6 +43,16 @@ class PluginMetadataChecks(unittest.TestCase):
         self.assertIn("action-карточ", fact_check.lower())
         self.assertIn("не переходи к pdf автоматически", fact_check.lower())
 
+    def test_runtime_requirements_and_preflight_are_declared(self):
+        runtime = json.loads((REPO / "runtime-requirements.json").read_text(encoding="utf-8"))
+        self.assertEqual(runtime["schema_version"], "0.1.0")
+        self.assertEqual(runtime["python"]["requirements_file"], "requirements.txt")
+        self.assertEqual(runtime["runtime"]["tectonic"]["managed_version"], "0.17.0")
+        preflight = (ROOT / "scripts/dependency_preflight.py").read_text(encoding="utf-8")
+        self.assertIn("--approve-install", preflight)
+        self.assertIn("bundled_codex_latex", preflight)
+        self.assertIn("SHA-256", preflight)
+
     def test_marketplace_entry_resolves_to_the_only_manifest(self):
         marketplace = json.loads((REPO / ".agents/plugins/marketplace.json").read_text(encoding="utf-8"))
         entries = marketplace["plugins"]
