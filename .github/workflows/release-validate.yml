@@ -7,9 +7,11 @@ on:
       - ".github/workflows/release-validate.yml"
       - "plugins/sf-lecture-materials/scripts/latex_math.py"
       - "plugins/sf-lecture-materials/scripts/pdf_flow.py"
+      - "plugins/sf-lecture-materials/scripts/verify_full_cycle_handoff.py"
       - "plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/**"
       - "tests/test_math_pdf.py"
       - "tests/test_golden_zones.py"
+      - "tests/test_full_cycle_handoff.py"
 
 permissions:
   contents: read
