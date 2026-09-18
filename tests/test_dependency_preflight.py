@@ -42,7 +42,8 @@ class DependencyPreflightChecks(unittest.TestCase):
     def test_bundled_codex_runtime_is_found_before_managed_download(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / ".codex"
-            binary = home / "plugins/cache/openai-bundled/latex/0.17.0/bin/tectonic.exe"
+            binary_name = "tectonic.exe" if os.name == "nt" else "tectonic"
+            binary = home / "plugins/cache/openai-bundled/latex/0.17.0/bin" / binary_name
             binary.parent.mkdir(parents=True)
             binary.write_bytes(b"not executed in this test")
             with (
