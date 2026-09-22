@@ -72,6 +72,9 @@ def internal_link_target(doc, link):
 
 def check_media_navigation(doc, composition, plan, block_ids, text_rows):
     import fitz
+    from visual_policy import validate_sources, check_pdf_text
+    validate_sources(composition)
+    check_pdf_text(doc, [row for row in text_rows if row.get("visual_id")])
     from PIL import Image
     def page_at(number):
         require(type(number) is int and 1 <= number <= len(doc), "Unknown page")
@@ -83,7 +86,7 @@ def check_media_navigation(doc, composition, plan, block_ids, text_rows):
     require(len(set(ids)) == len(ids) and [v["visual_id"] for v in placed] == ids, "Missing/reordered/duplicate visual")
     for visual, placement in zip(visuals, placed):
         image_path, source_path = checked(visual["image"]), checked(visual["source"])
-        require(isinstance(visual.get("role"), str) and visual["role"].strip() and isinstance(visual.get("caption"), str) and visual["caption"].strip(), "Missing visual role/caption")
+        require(isinstance(visual.get("role"), str) and visual["role"].strip() and isinstance(visual.get("caption"), str) and (visual["caption"].strip() or visual.get("blank_caption_authorization")), "Missing visual role/caption")
         anchors = visual.get("text_block_ids")
         require(isinstance(anchors, list) and anchors and set(anchors) <= set(block_ids), "Unknown visual text anchors")
         if "frame" in visual:
@@ -107,7 +110,7 @@ def check_media_navigation(doc, composition, plan, block_ids, text_rows):
         require(abs(rect.width/rect.height - pix.width/pix.height) <= 0.002, "Visual aspect ratio changed")
         matches = [i for i in page.get_image_info(hashes=True) if i["digest"] == pix.digest and max(abs(a-b) for a,b in zip(i["bbox"], rect)) < 0.6]
         require(len(matches) == 1, "Chosen visual is missing/changed in PDF")
-        require(any(r.get("visual_id") == visual["visual_id"] and r["text"] == visual["caption"] for r in text_rows), "Visual caption is not tied to planned PDF text")
+        require((not visual["caption"] and visual.get("blank_caption_authorization")) or any(r.get("visual_id") == visual["visual_id"] and r["text"] == visual["caption"] for r in text_rows), "Visual caption is not tied to planned PDF text")
     links = plan.get("links")
     require(isinstance(links, list), "Missing link plan")
     actual_links = [(page.number, link, internal_link_target(doc, link)) for page in doc for link in page.get_links()]

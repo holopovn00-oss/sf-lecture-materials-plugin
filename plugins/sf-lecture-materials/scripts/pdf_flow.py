@@ -112,13 +112,16 @@ def wrap_atoms(atoms, style):
             delta = available-natural
             extra = delta/nspaces if nspaces else 0
             if natural-(1-style["min_space_ratio"])*nspaces*space_width > available+.001:
-                break
+                # A later whole-word boundary can fit after the optional hyphen
+                # disappears. Candidate widths are not monotone at these points.
+                continue
             if end not in costs or (not nspaces and end < count and abs(delta) > .2):
                 continue
             if end < count and extra > (style["max_space_ratio"]-1)*space_width+.001:
                 continue
             penalty = (extra/space_width)**2 if end < count else (max(0,-extra)/space_width)**2
-            options.append((penalty + (.4 if hyphen else 0) + costs[end], -end, end))
+            # Prefer compact legal paragraphs without relaxing word-space limits.
+            options.append((100 + penalty + (.4 if hyphen else 0) + costs[end], -end, end))
         if options:
             cost, _, end = min(options)
             costs[start], cuts[start] = cost, end

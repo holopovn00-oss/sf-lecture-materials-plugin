@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 from pathlib import Path
 import re
 import sys
@@ -185,7 +186,62 @@ def wrap(text, width, size, font=FONT_NAME):
     return lines
 
 
+def display_timestamp(value):
+    """Truncate fractional seconds for display; do not modify source anchors."""
+    return re.sub(r"(\b\d{2,}:\d{2}:\d{2})[.,]\d+", r"\1", value)
+
+
+def topic_timestamp(lecture, topic_id, source_labels=None):
+    """Combine only adjacent blocks with ordered anchors in the same source file."""
+    placements = lecture["structure"]["placements"]
+    selected = [(i, p) for i, p in enumerate(placements) if p["topic_id"] == topic_id]
+    source_labels = source_labels or {}
+    source_uris = {a.get("source_uri") for _, p in selected
+                   for a in lecture.get("source_locators", {}).get(p["text_block_id"], [])}
+    label = source_labels.get(next(iter(source_uris)), "") if len(source_uris) == 1 else ""
+    def labeled(value):
+        return (label+" · " if label and value else "")+value
+    if len(selected) == 1:
+        return labeled(selected[0][1].get("timestamp_range") or "")
+    if not selected or [i for i, _ in selected] != list(range(selected[0][0], selected[-1][0]+1)):
+        return ""
+    intervals, sources = [], set()
+    for _, placement in selected:
+        anchors = lecture.get("source_locators", {}).get(placement["text_block_id"], [])
+        if not anchors or any(not a.get("source_uri") or not isinstance(a.get("start_ms"), int)
+                              or not isinstance(a.get("end_ms"), int) or a["start_ms"] < 0
+                              or a["end_ms"] < a["start_ms"] for a in anchors):
+            return ""
+        sources.update(a["source_uri"] for a in anchors)
+        intervals.append((min(a["start_ms"] for a in anchors), max(a["end_ms"] for a in anchors)))
+    if len(sources) != 1 or any(b[0] < a[0] or b[1] < a[1] for a, b in zip(intervals, intervals[1:])):
+        return ""
+    def stamp(ms):
+        seconds = ms // 1000
+        return f"{seconds//3600:02}:{seconds//60%60:02}:{seconds%60:02}"
+    return labeled(stamp(intervals[0][0])+" — "+stamp(intervals[-1][1]))
+
+
+def time_source_labels(lecture, composition):
+    """Use explicit video/transcript correspondence, never cumulative offsets."""
+    known = {a["source_uri"] for anchors in lecture.get("source_locators", {}).values()
+             for a in anchors if a.get("source_uri") and a.get("start_ms") is not None}
+    labels = {}
+    for row in composition.get("time_sources", []):
+        uri, label = row.get("source_uri"), row.get("label")
+        require(uri in known and uri not in labels, "Unknown or duplicate timed source")
+        require(isinstance(label, str) and label.strip() and label not in labels.values(),
+                "Missing or duplicate video label")
+        require(isinstance(row.get("basis"), str) and row["basis"].strip(),
+                "Video label requires a source correspondence basis")
+        labels[uri] = label
+    if known:
+        require(set(labels) == known, "Timed sources require explicit video labels, including a single video")
+    return labels
+
+
 def divider_layout(title, time, y, profile, style):
+    time = display_timestamp(time)
     bar = profile["topic_bar"]
     right = style["x"][1]+style["width"]
     size, leading = bar["title_size_pt"], bar["title_leading_pt"]
@@ -206,9 +262,17 @@ def visual_layout(visual, profile):
     image = checked(visual["image"])
     checked(visual["source"])
     with Image.open(image) as im:
-        scale = min(mm["image_max_width"]*MM/im.width, mm["image_max_height"]*MM/im.height)
+        requested_width = visual.get("display_width_mm", mm["image_max_width"])
+        require(type(requested_width) in (int, float) and math.isfinite(requested_width)
+                and 0 < requested_width <= mm["image_max_width"], "Invalid visual display width")
+        if "display_width_mm" in visual:
+            require(isinstance(visual.get("size_reason"), str) and visual["size_reason"].strip(),
+                    "Explicit visual size requires a readability/layout reason")
+        scale = min(requested_width*MM/im.width, mm["image_max_height"]*MM/im.height)
         width, height = im.width*scale, im.height*scale
-    lines = wrap(visual["caption"], mm["image_max_width"]*MM, pt["caption_size"])
+    lines = [line for paragraph in visual["caption"].splitlines() if paragraph.strip()
+             for line in wrap(paragraph, mm["image_max_width"]*MM, pt["caption_size"])]
+    require(lines or visual.get("blank_caption_authorization"), "Empty visual caption")
     total = 2*mm["card_padding"]*MM+height+mm["image_caption_gap"]*MM+len(lines)*pt["caption_leading"]
     return {"visual": visual, "width": width, "image_height": height, "height": total, "caption_lines": lines}
 
@@ -219,10 +283,11 @@ def layout_body(lecture, composition, assets, profile, style):
     gap = mm["heading_gap"]*MM
     placements = lecture["structure"]["placements"]
     topics = lecture["structure"]["topics"]
+    source_labels = time_source_labels(lecture, composition)
     by_block = {p["text_block_id"]: p for p in placements}
     media = {}
     for visual in composition["visuals"]:
-        require(visual.get("role") and visual.get("caption") and visual.get("text_block_ids"), "Incomplete visual")
+        require(visual.get("role") and (visual.get("caption") or visual.get("blank_caption_authorization")) and visual.get("text_block_ids"), "Incomplete visual")
         anchor = visual["text_block_ids"][0]
         require(anchor in by_block, "Unknown visual anchor")
         media.setdefault(anchor, []).append(visual_layout(visual, profile))
@@ -258,9 +323,7 @@ def layout_body(lecture, composition, assets, profile, style):
                 if current is None or current["section_id"] != section:
                     start_page(section)
                 first = tid not in seen_topics
-                time_values = [p.get("timestamp_range") for p in placements if p["topic_id"] == tid]
-                # Never synthesize a combined time interval from unrelated sources.
-                time = time_values[0] if len(time_values) == 1 and time_values[0] else ""
+                time = topic_timestamp(lecture, tid, source_labels)
                 media_height = sum(c["height"]+mm["card_following_gap"]*MM for c in cards)
                 divider = divider_layout(topic["title"], time, y+media_height, profile, style) if first else None
                 body_top = y+media_height+(divider["height"]+gap if divider else 0)
@@ -316,6 +379,10 @@ def render(lecture_path, out, *, composition_path=None, handoff_path=None, workf
     tokens = profile["visual_tokens"]
     composition = json.loads(Path(composition_path).read_text(encoding="utf-8-sig")) if composition_path else {"visuals": []}
     require(isinstance(composition.get("visuals"), list), "Missing composition visuals")
+    from visual_policy import validate_sources, display_caption
+    validate_sources(composition)
+    for visual in composition["visuals"]:
+        visual["caption"] = display_caption(visual.get("caption", ""))
     workflow = {"mode": workflow_mode, "full_cycle_handoff":
                 {**ref(handoff_path), "kind": "full_cycle_handoff"} if handoff_path else None}
     check_workflow({"workflow": workflow}, {"lecture": ref(lecture_path)})
@@ -443,7 +510,7 @@ def render(lecture_path, out, *, composition_path=None, handoff_path=None, workf
         canvas.showPage()
     for page in pages:
         current_number+=1
-        internal(page["section_id"],pattern=current_number > offset+1)
+        internal(page["section_id"],pattern=not bool(page.get("section_title")))
         for i,line in enumerate(page.get("section_title",[])):
             service(line,style["x"][0],mm["topic_title_top"]*MM+i*pt["topic_title_leading"],
                     pt["topic_title_size"],bold=True)
@@ -467,7 +534,7 @@ def render(lecture_path, out, *, composition_path=None, handoff_path=None, workf
             rows=plan["text"][caption_start:]
             plan["text"][caption_start:]=[{"page":current_number,"visual_id":visual["visual_id"],"text":visual["caption"],
                                           "bbox":[min(r["bbox"][0] for r in rows),rows[0]["bbox"][1],
-                                                  max(r["bbox"][2] for r in rows),rows[-1]["bbox"][3]]}]
+                                                  max(r["bbox"][2] for r in rows),rows[-1]["bbox"][3]]}] if rows else []
         for zone in page["zones"]:
             divider=None
             data=zone["divider_layout"]

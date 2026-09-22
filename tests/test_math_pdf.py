@@ -104,8 +104,15 @@ class MathPdfChecks(unittest.TestCase):
         case.setUp()
         self.addCleanup(case.doCleanups)
         gate = case.handoff(case.write_report(case.report()))
+        selected=json.loads(case.selected_path.read_text(encoding="utf-8"))
+        uris=sorted({a["source_uri"] for anchors in selected["source_locators"].values()
+                     for a in anchors if a.get("start_ms") is not None})
+        composition_path=case.root/"renderer-composition.json"
+        write(composition_path,{"visuals":[],"time_sources":[
+            {"source_uri":uri,"label":f"Видео {i}","basis":"Explicit synthetic fixture correspondence"}
+            for i,uri in enumerate(uris,1)]})
         result = render(case.selected_path, case.root/"full-pdf",
-                        handoff_path=gate, workflow_mode="full_cycle")
+                        handoff_path=gate, workflow_mode="full_cycle", composition_path=composition_path)
         receipt = PDF.check(result["manifest"])
         self.assertEqual(receipt["workflow"], "FULL_CYCLE_FACT_CHECK_GATE_VALIDATED")
         self.assertGreater(receipt["formulas"], 0)

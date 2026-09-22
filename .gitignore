@@ -12,3 +12,5 @@ accepted-manifest.json
 source-manifest.json
 text-review.json
 visual-review.json
+# Machine-local preferences, scoped only to SF Lecture Materials.
+/plugins/sf-lecture-materials/LOCAL_MEMORY.md

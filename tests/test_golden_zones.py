@@ -34,10 +34,14 @@ class GoldenZoneChecks(unittest.TestCase):
         self.lecture["content_hash"]=H.digest({k:v for k,v in self.lecture.items() if k!="content_hash"})
         path=self.root/"lecture.json"
         path.write_text(json.dumps(self.lecture,ensure_ascii=False),encoding="utf-8")
-        composition_path=None
-        if composition is not None:
-            composition_path=self.root/"composition-input.json"
-            composition_path.write_text(json.dumps(composition,ensure_ascii=False),encoding="utf-8")
+        composition=copy.deepcopy(composition) if composition is not None else {"visuals":[]}
+        uris=sorted({a["source_uri"] for anchors in self.lecture["source_locators"].values()
+                     for a in anchors if a.get("start_ms") is not None})
+        composition.setdefault("time_sources",[
+            {"source_uri":uri,"label":f"Видео {i}","basis":"Explicit synthetic fixture correspondence"}
+            for i,uri in enumerate(uris,1)])
+        composition_path=self.root/"composition-input.json"
+        composition_path.write_text(json.dumps(composition,ensure_ascii=False),encoding="utf-8")
         result=render(path,self.root/"output",composition_path=composition_path,workflow_mode=workflow)
         manifest=Path(result["manifest"])
         return manifest,json.loads(manifest.read_text(encoding="utf-8"))
@@ -58,6 +62,40 @@ class GoldenZoneChecks(unittest.TestCase):
         self.assertEqual(result["pages"],3)
         self.assertGreater(result["links"],0)
         self.assertEqual(check_zones(path,data["zone_plan"]["path"])["workflow"],"DIRECT_SKILL_NO_FACT_CHECK_GATE")
+
+    def test_each_section_starts_without_pattern(self):
+        self.lecture["structure"]["sections"].append(dict(section_id="sec2",number="2",title="Второй раздел"))
+        self.lecture["structure"]["topics"][1]["section_id"]="sec2"
+        self.lecture["structure"]["placements"][1]["section_id"]="sec2"
+        path,data=self.generate()
+        with fitz.open(data["artifacts"]["pdf"]["path"]) as doc:
+            starts=[row[2] for row in doc.get_toc() if row[0]==1 and row[1]!="Содержание"]
+            self.assertEqual(len(starts),2)
+            for number in starts:
+                self.assertFalse(any((im["width"],im["height"])==(1392,1883)
+                                     for im in doc[number-1].get_image_info()))
+
+    def test_file_extensions_in_body_survive_complete_validation(self):
+        self.lecture["blocks"][0]["content"]=[{"type":"paragraph","runs":[{"type":"text","text":
+            "Откройте файл example.pdf. Сохраните презентацию в формате .pptx. Прочитайте notes.txt."}]}]
+        path,data=self.generate()
+        self.assertEqual(check(path)["status"],"PDF_MECHANICS_VALIDATED")
+        with fitz.open(data["artifacts"]["pdf"]["path"]) as doc:
+            text=" ".join(p.get_text() for p in doc)
+            self.assertIn("example.pdf",text)
+            self.assertIn("Видео 1",text)
+
+    def test_authorized_diagram_passes_renderer_and_validator(self):
+        from PIL import Image
+        image=self.root/"authored.png"
+        Image.new("RGB",(320,160),"white").save(image)
+        composition={"visuals":[{"visual_id":"authored","origin":"authored",
+            "image":ref(image),"source":ref(image),"text_block_ids":["b1"],
+            "role":"explanation","caption":"Авторская схема: последовательность проверки",
+            "authoring":{"authorization":"Explicit synthetic test permission","basis":"Selected block b1"},
+            "lecturer_photo_review":"absent"}]}
+        path,data=self.generate(composition=composition)
+        self.assertEqual(check(path)["status"],"PDF_MECHANICS_VALIDATED")
 
     def test_short_indivisible_tail_uses_empty_right_column(self):
         self.lecture["blocks"][1]["content"]=[{"type":"paragraph","runs":[{"type":"text","text":"Короткое определение."}]}]
@@ -105,7 +143,7 @@ class GoldenZoneChecks(unittest.TestCase):
         from PIL import Image
         image=self.root/"visual.png"
         Image.new("RGB",(400,180),"navy").save(image)
-        composition={"visuals":[{"visual_id":"v1","image":ref(image),"source":ref(image),
+        composition={"source_root":str(self.root),"source_inventory":[{**ref(image),"role":"original_visual"}],"visuals":[{"lecturer_photo_review":"absent","source_locator":"whole supplied image","visual_id":"v1","image":ref(image),"source":ref(image),
                                 "text_block_ids":["b1"],"role":"Synthetic diagram",
                                 "caption":"Исходное изображение для проверки размещения."}]}
         path,data=self.generate(composition=composition)
