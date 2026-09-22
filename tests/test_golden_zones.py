@@ -91,11 +91,36 @@ class GoldenZoneChecks(unittest.TestCase):
         Image.new("RGB",(320,160),"white").save(image)
         composition={"visuals":[{"visual_id":"authored","origin":"authored",
             "image":ref(image),"source":ref(image),"text_block_ids":["b1"],
-            "role":"explanation","caption":"Авторская схема: последовательность проверки",
+            "role":"explanation","caption":"Источник: Авторская схема\nСлайд №: не применимо\nТема: Последовательность проверки",
             "authoring":{"authorization":"Explicit synthetic test permission","basis":"Selected block b1"},
             "lecturer_photo_review":"absent"}]}
         path,data=self.generate(composition=composition)
         self.assertEqual(check(path)["status"],"PDF_MECHANICS_VALIDATED")
+
+    def test_long_source_wraps_before_explicit_blank_slide_field(self):
+        from PIL import Image
+        from visual_policy import caption_fields
+        image=self.root/"visual.png"
+        Image.new("RGB",(400,180),"navy").save(image)
+        source_name="Название исходного учебного материала " * 5
+        caption=f"Источник: {source_name.strip()}.pdf\nСлайд №\nТема: Разбор example.pdf"
+        composition={"source_root":str(self.root),
+            "source_inventory":[{**ref(image),"role":"original_visual"}],
+            "visuals":[{"visual_id":"wrapped","image":ref(image),"source":ref(image),
+                "source_locator":"whole supplied image","lecturer_photo_review":"absent",
+                "text_block_ids":["b1"],"role":"Synthetic example","caption":caption,
+                "blank_caption_authorization":"User explicitly requested an empty slide field"}]}
+        path,data=self.generate(composition=composition)
+        self.assertEqual(check(path)["visuals"],1)
+        plan=json.loads(Path(data["artifacts"]["render_plan"]["path"]).read_text(encoding="utf-8"))
+        row=next(r for r in plan["text"] if r.get("visual_id")=="wrapped")
+        with fitz.open(data["artifacts"]["pdf"]["path"]) as doc:
+            actual=doc[row["page"]-1].get_textbox(row["bbox"])
+        fields=caption_fields(actual,"Explicit synthetic blank field permission")
+        self.assertIn("\n",fields[0])
+        self.assertEqual(" ".join(fields[0].split()),source_name.strip())
+        self.assertEqual(fields[1],"")
+        self.assertEqual(fields[2],"Разбор example.pdf")
 
     def test_short_indivisible_tail_uses_empty_right_column(self):
         self.lecture["blocks"][1]["content"]=[{"type":"paragraph","runs":[{"type":"text","text":"Короткое определение."}]}]
@@ -145,9 +170,14 @@ class GoldenZoneChecks(unittest.TestCase):
         Image.new("RGB",(400,180),"navy").save(image)
         composition={"source_root":str(self.root),"source_inventory":[{**ref(image),"role":"original_visual"}],"visuals":[{"lecturer_photo_review":"absent","source_locator":"whole supplied image","visual_id":"v1","image":ref(image),"source":ref(image),
                                 "text_block_ids":["b1"],"role":"Synthetic diagram",
-                                "caption":"Исходное изображение для проверки размещения."}]}
+                                "caption":"Источник: Учебная презентация.pdf\nСлайд № 12\nТема: Проверка размещения example.pdf"}]}
         path,data=self.generate(composition=composition)
         self.assertEqual(check(path)["visuals"],1)
+        with fitz.open(data["artifacts"]["pdf"]["path"]) as doc:
+            lines=[line.strip() for page in doc for line in page.get_text().splitlines()]
+            start=lines.index("Источник: Учебная презентация")
+            self.assertEqual(lines[start:start+3], [
+                "Источник: Учебная презентация", "Слайд № 12", "Тема: Проверка размещения example.pdf"])
 
 if __name__=="__main__":
     unittest.main()
