@@ -1,44 +1,73 @@
 {
   "schema_version": "golden-acceptance/1.0",
-  "accepted_on": "2026-09-18",
-  "user_decision": "на скриншоте — правильное оформление",
+  "accepted_on": "2026-09-26",
+  "user_decision": "После просмотра редакции v5: «все ок»; затем запрос перенести остаток на страницу 12 и утверждение плана публикации v6: «работай».",
   "version": "0.1.0",
   "pdf": "../assets/golden/golden.pdf",
-  "sha256": "9CF366F4D6341248BF1F502994316D9661617E54A896397BA754C33A071651EC",
+  "sha256": "5E70D344159C76CF1B3FFCFB42159EEA76E56D82C27397A04791B398202C108B",
   "pages": 28,
   "profile": "adapters/a4/2.1.0.json",
-  "profile_sha256": "ED9D3C559B23A8F67919FC8C218387C1A33AC06AABF71761C645E6426E65321C",
+  "profile_sha256": "619E06D62416C00A1B9C745E33D01D23F8B71E4D9C47671ED399CE412EAA1DA0",
   "contract": "contracts/a4/document-golden-gate-2.1.0.json",
-  "contract_sha256": "BDBFD4A57FF47E93253B93ECB639FD39DC029E2898A848C02BBFB88B8888B015",
+  "contract_sha256": "1AD967C190E7EC3120FC0E431F3C66E63B464FACFAC4CEB38964F882277E735B",
   "targeted_checks": {
     "A4": 28,
-    "toc_topics_and_actual_destinations": 32,
-    "bookmarks_unchanged": true,
-    "other_pages_text_identical": 27,
-    "other_pages_pixels_identical_at_108dpi": 27,
-    "other_pages_links_identical": 27
+    "visual_caption_triplets": 17,
+    "visual_caption_video_lines": 0,
+    "toc_links": 32,
+    "topic_time_ranges": 32,
+    "bookmarks": 39,
+    "page_12_contains_previous_short_tail": true,
+    "page_13_starts_next_chapter": true
   },
   "targeted_errors": [],
   "visual_review": {
     "reviewer": "current_agent",
     "independent": false,
     "pages_reviewed": [
-      2
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28
     ],
-    "result": "Matches user-confirmed TOC style; other 27 pages unchanged from previous revision, not claimed as newly visually reviewed."
+    "result": "All 28 pages rendered at 120 dpi and visually inspected by the current agent for layout, captions, chapter transitions and the page 12-13 correction. This is not independent semantic review."
   },
   "standard_validator": "NOT_CERTIFIED: multi-zone layout and block-local exceptions require adapted validation",
   "exceptions": {
-    "scope_pdf_sha256": "9CF366F4D6341248BF1F502994316D9661617E54A896397BA754C33A071651EC",
-    "max_word_space_ratio": {
-      "P034": 4.1,
-      "P080": 4.1
-    },
-    "global_max_unchanged": 3,
-    "basis": "Only TOC changed; pages containing P034 and P080 have identical text, rendered pixels and links to previous revision."
+    "scope_pdf_sha256": "5E70D344159C76CF1B3FFCFB42159EEA76E56D82C27397A04791B398202C108B",
+    "status": "Previous P034/P080 word-space exceptions are not inherited; the standard full validator remains NOT_CERTIFIED for this historical Golden."
   },
-  "acceptance_scope": "User-confirmed TOC appearance; rebuilt PDF not yet manually reviewed. Other pages verified visually and textually unchanged.",
+  "acceptance_scope": "User-approved publication of the named v6 Golden after targeted layout feedback. Current-agent visual and structural checks are recorded above; no independent content acceptance is implied.",
   "previous_revision": {
+    "sha256": "9CF366F4D6341248BF1F502994316D9661617E54A896397BA754C33A071651EC",
+    "accepted_on": "2026-09-18",
+    "user_decision": "на скриншоте — правильное оформление",
+    "acceptance_scope": "User-confirmed TOC appearance only; other 27 pages were unchanged from the then-previous revision.",
+    "previous_revision": {
     "sha256": "333AC8285320A1CCE0D5EE1D3CFB0F8601C6D1B18377E034D249969C49E0BB55",
     "user_decision": "принято, меняй гитхаб",
     "targeted_checks": {
@@ -110,6 +139,7 @@
         27,
         28
       ]
+    }
     }
   }
 }

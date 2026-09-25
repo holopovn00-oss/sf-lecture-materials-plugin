@@ -270,11 +270,19 @@ def visual_layout(visual, profile):
                     "Explicit visual size requires a readability/layout reason")
         scale = min(requested_width*MM/im.width, mm["image_max_height"]*MM/im.height)
         width, height = im.width*scale, im.height*scale
+    following_gap = visual.get("following_gap_mm", mm["card_following_gap"])
+    require(type(following_gap) in (int, float) and math.isfinite(following_gap)
+            and mm["card_following_gap_min"] <= following_gap <= mm["card_following_gap"],
+            "Visual following gap outside the A4 profile")
+    if "following_gap_mm" in visual:
+        require(isinstance(visual.get("layout_reason"), str) and visual["layout_reason"].strip(),
+                "Explicit visual following gap requires a layout reason")
     lines = [line for paragraph in visual["caption"].splitlines() if paragraph.strip()
              for line in wrap(paragraph, mm["image_max_width"]*MM, pt["caption_size"])]
     require(lines or visual.get("blank_caption_authorization"), "Empty visual caption")
     total = 2*mm["card_padding"]*MM+height+mm["image_caption_gap"]*MM+len(lines)*pt["caption_leading"]
-    return {"visual": visual, "width": width, "image_height": height, "height": total, "caption_lines": lines}
+    return {"visual": visual, "width": width, "image_height": height, "height": total,
+            "caption_lines": lines, "following_gap": following_gap*MM}
 
 
 def layout_body(lecture, composition, assets, profile, style):
@@ -324,7 +332,7 @@ def layout_body(lecture, composition, assets, profile, style):
                     start_page(section)
                 first = tid not in seen_topics
                 time = topic_timestamp(lecture, tid, source_labels)
-                media_height = sum(c["height"]+mm["card_following_gap"]*MM for c in cards)
+                media_height = sum(c["height"]+c["following_gap"] for c in cards)
                 divider = divider_layout(topic["title"], time, y+media_height, profile, style) if first else None
                 body_top = y+media_height+(divider["height"]+gap if divider else 0)
                 capacity = style["bottom"]-body_top
@@ -340,7 +348,7 @@ def layout_body(lecture, composition, assets, profile, style):
                     card_y = y
                     for card in cards:
                         current["cards"].append({**card, "top": card_y})
-                        card_y += card["height"]+mm["card_following_gap"]*MM
+                        card_y += card["height"]+card["following_gap"]
                     cards = []
                 current["zones"].append(zone)
                 seen_topics.add(tid)

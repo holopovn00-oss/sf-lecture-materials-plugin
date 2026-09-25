@@ -91,7 +91,7 @@ class GoldenZoneChecks(unittest.TestCase):
         Image.new("RGB",(320,160),"white").save(image)
         composition={"visuals":[{"visual_id":"authored","origin":"authored",
             "image":ref(image),"source":ref(image),"text_block_ids":["b1"],
-            "role":"explanation","caption":"Источник: Авторская схема\nСлайд №: не применимо\nТема: Последовательность проверки",
+            "role":"explanation","caption":"Источник: Авторская схема\nСлайд: не применимо.\nТема: Последовательность проверки",
             "authoring":{"authorization":"Explicit synthetic test permission","basis":"Selected block b1"},
             "lecturer_photo_review":"absent"}]}
         path,data=self.generate(composition=composition)
@@ -103,7 +103,7 @@ class GoldenZoneChecks(unittest.TestCase):
         image=self.root/"visual.png"
         Image.new("RGB",(400,180),"navy").save(image)
         source_name="Название исходного учебного материала " * 5
-        caption=f"Источник: {source_name.strip()}.pdf\nСлайд №\nТема: Разбор example.pdf"
+        caption=f"Источник: {source_name.strip()}.pdf\nСлайд:\nТема: Разбор example.pdf"
         composition={"source_root":str(self.root),
             "source_inventory":[{**ref(image),"role":"original_visual"}],
             "visuals":[{"visual_id":"wrapped","image":ref(image),"source":ref(image),
@@ -170,14 +170,33 @@ class GoldenZoneChecks(unittest.TestCase):
         Image.new("RGB",(400,180),"navy").save(image)
         composition={"source_root":str(self.root),"source_inventory":[{**ref(image),"role":"original_visual"}],"visuals":[{"lecturer_photo_review":"absent","source_locator":"whole supplied image","visual_id":"v1","image":ref(image),"source":ref(image),
                                 "text_block_ids":["b1"],"role":"Synthetic diagram",
-                                "caption":"Источник: Учебная презентация.pdf\nСлайд № 12\nТема: Проверка размещения example.pdf"}]}
+                                "caption":"Источник: Учебная презентация.pdf\nСлайд 12.\nТема: Проверка размещения example.pdf"}]}
         path,data=self.generate(composition=composition)
         self.assertEqual(check(path)["visuals"],1)
         with fitz.open(data["artifacts"]["pdf"]["path"]) as doc:
             lines=[line.strip() for page in doc for line in page.get_text().splitlines()]
             start=lines.index("Источник: Учебная презентация")
             self.assertEqual(lines[start:start+3], [
-                "Источник: Учебная презентация", "Слайд № 12", "Тема: Проверка размещения example.pdf"])
+                "Источник: Учебная презентация", "Слайд 12.", "Тема: Проверка размещения example.pdf"])
+
+    def test_local_card_gap_is_bounded_and_requires_a_reason(self):
+        from PIL import Image
+        from render_golden import PDF_ROOT, PROFILE, visual_layout
+        from pdf_flow import MM, font_metrics
+        image=self.root/"visual.png"
+        Image.new("RGB",(400,180),"navy").save(image)
+        visual={"image":ref(image),"source":ref(image),
+                "caption":"Источник: Учебная презентация\nСлайд 3.\nТема: Пример"}
+        profile=json.loads(PROFILE.read_text(encoding="utf-8"))
+        font_metrics(PDF_ROOT, profile["layout_profile"]["pt"]["caption_size"])
+        self.assertAlmostEqual(visual_layout(visual,profile)["following_gap"],5*MM)
+        visual.update(following_gap_mm=3.6,layout_reason="Keep a short related paragraph on the page")
+        self.assertAlmostEqual(visual_layout(visual,profile)["following_gap"],3.6*MM)
+        for bad in (2.9,5.1,float("nan"),True):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                visual_layout({**visual,"following_gap_mm":bad},profile)
+        with self.assertRaises(ValueError):
+            visual_layout({**visual,"layout_reason":""},profile)
 
 if __name__=="__main__":
     unittest.main()
