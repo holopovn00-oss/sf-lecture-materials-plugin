@@ -1,7 +1,7 @@
 {
   "$id": "https://sf.education/sf-lecture-materials/contracts/a4/2.1.0",
   "schema_version": "2.1.0",
-  "source_golden_sha256": "9CF366F4D6341248BF1F502994316D9661617E54A896397BA754C33A071651EC",
+  "source_golden_sha256": "5E70D344159C76CF1B3FFCFB42159EEA76E56D82C27397A04791B398202C108B",
   "rights_status": "CONFIRMED",
   "requirements": "A33-A45 and M01-M20 retained where compatible; approved study-guide, paragraph and LaTeX requirements 2026-09-12",
   "cover_title": {
@@ -182,11 +182,10 @@
     "fit": "contain-no-crop",
     "padding_mm": 3,
     "image_caption_gap_mm": 3,
-    "caption_video_gap_mm": 2,
     "following_gap_mm": 5,
+    "following_gap_min_mm": 3,
     "border_pt": 0.5,
-    "radius_mm": 2.3,
-    "video_time": "verified-decoded-frame-time-only-never-transcript-range"
+    "radius_mm": 2.3
   },
   "tolerances": {
     "page_mm": 0.05,

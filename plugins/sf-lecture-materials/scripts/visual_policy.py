@@ -6,12 +6,21 @@ from pathlib import Path
 EXT = re.compile(r'\.(?:pdf|pptx?|docx?|mp4|mov|mkv|txt|vtt|srt|png|jpe?g)(?=\b|[»”])', re.I)
 SERVICE = re.compile(r'\bFC-\d+\b|ниже дана правильная запись|исправленная степень|нижняя схема приближенная', re.I)
 # Only the explicitly marked source-name field is normalized, not teaching text.
-SOURCE_NAME = re.compile(r'(?:^|\n)(Источник[ \t]*:[ \t]*)(.*?)(?=\s*→|\n(?:Слайд[ \t]+№|Тема[ \t]*:)|\Z)', re.I | re.S)
-CAPTION_FIELD = re.compile(r'^(Источник[ \t]*:|Слайд[ \t]+№[ \t]*:?|Тема[ \t]*:)[ \t]*', re.M)
+SOURCE_NAME = re.compile(
+    r'(?:^|\n)(Источник[ \t]*:[ \t]*)(.*?)'
+    r'(?=\n(?:Слайд(?=[ \t:]|$)|Страница(?=[ \t:]|$)|Тема[ \t]*:)|\Z)',
+    re.I | re.S,
+)
+CAPTION_FIELD = re.compile(
+    r'^(Источник[ \t]*:|Слайд(?=[ \t:]|$)[ \t]*:?|'
+    r'Страница(?=[ \t:]|$)[ \t]*:?|Тема[ \t]*:)[ \t]*', re.M,
+)
+CAPTION_TIME = re.compile(r'\b\d{2}:\d{2}:\d{2}\b')
+CAPTION_VIDEO_LINE = re.compile(r'^\s*Видео(?:[ \t]+\d+)?(?:[ \t]*:|[ \t]+\d{2}:\d{2})', re.I | re.M)
 
 
 def caption_fields(text, blank_authorization=None):
-    """Three ordered fields, each on a new line; wrapping inside a field is allowed."""
+    """Three ordered fields; visual captions never contain video/time badges."""
     if not isinstance(text, str):
         raise ValueError('Caption must be text')
     authorized = isinstance(blank_authorization, str) and bool(blank_authorization.strip())
@@ -19,14 +28,25 @@ def caption_fields(text, blank_authorization=None):
         if authorized:
             return []
         raise ValueError('Blank caption requires recorded user instruction')
+    if CAPTION_TIME.search(text) or CAPTION_VIDEO_LINE.search(text):
+        raise ValueError('Video label and timing are not allowed in a visual caption')
     matches = list(CAPTION_FIELD.finditer(text))
     if (len(matches) != 3 or matches[0].start() != 0 or
-            [m.group(1).split()[0].rstrip(':') for m in matches] != ['Источник', 'Слайд', 'Тема']):
-        raise ValueError('Caption requires three separate fields in order: Источник, Слайд №, Тема')
+            matches[0].group(1).split()[0].rstrip(':') != 'Источник' or
+            matches[1].group(1).split()[0].rstrip(':') not in ('Слайд', 'Страница') or
+            matches[2].group(1).split()[0].rstrip(':') != 'Тема'):
+        raise ValueError('Caption requires three separate fields in order: Источник, Слайд/Страница, Тема')
     fields = [text[m.end():matches[i + 1].start() if i < 2 else len(text)].strip()
               for i, m in enumerate(matches)]
     if any(not field for field in fields) and not authorized:
         raise ValueError('Blank caption field requires recorded user instruction')
+    locator = fields[1]
+    has_colon = matches[1].group(1).rstrip().endswith(':')
+    if not ((not has_colon and re.fullmatch(r'[1-9]\d*\.', locator)) or
+            (has_colon and locator == 'не применимо.') or
+            (has_colon and not locator and authorized)):
+        raise ValueError('Second caption line must be Слайд N., Страница N. or Слайд: не применимо.')
+    fields[1] = locator.removesuffix('.')
     return fields
 
 
