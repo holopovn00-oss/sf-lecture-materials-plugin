@@ -20,6 +20,8 @@ class CurrentPackageChecks(unittest.TestCase):
         self.assertEqual(plugin["version"], "0.1.0")
         self.assertEqual(bundle["plugin_version"], plugin["version"])
         self.assertEqual(acceptance["version"], plugin["version"])
+        self.assertNotIn("previous_revision", acceptance)
+        self.assertEqual(len(list((PDF_ROOT / "assets/golden").glob("*.pdf"))), 1)
 
     def test_assets_and_golden_are_pinned(self):
         import fitz
