@@ -14,6 +14,6 @@
 | Правила Golden Gate | [golden-rules.md](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/references/golden-rules.md) |
 | Принятый эталон | [golden-accepted.json](../plugins/sf-lecture-materials/skills/sf-lecture-to-golden-pdf/references/golden-accepted.json) |
 
-Версия плагина 0.1.0 не заменяет версии независимых форматов: LectureText 3.0.0, FactCheck 1.0.0, text-review, full-cycle handoff 1.0.0 и Candidate Manifest 2.1, профиль/контракт A4 2.1.0. Происхождение ресурсов сохранено в provenance и лицензиях; исторические пути там не являются исполняемыми зависимостями.
+Версия плагина 0.1.0 не заменяет версии независимых форматов: LectureText 3.0.0, FactCheck 1.0.0, text-review, full-cycle handoff 1.0.0 и Candidate Manifest 2.1, профиль/контракт A4 2.1.0. Сведения о сторонних ресурсах и лицензиях приведены в [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-История изменений остается в Git. Старые файлы поставки и ветки совместимости удалены из текущего дерева; отчеты прежних запусков не удостоверяют новую редакцию. Marketplace не дублирует версию плагина: ее источник — .codex-plugin/plugin.json.
+История изменений остается в Git. Отчеты прежних запусков не удостоверяют текущую редакцию. Marketplace не дублирует версию плагина: ее источник — .codex-plugin/plugin.json.
