@@ -40,7 +40,7 @@ class PluginMetadataChecks(unittest.TestCase):
         general = (ROOT / "skills/sf-lecture-materials/agents/openai.yaml").read_text(encoding="utf-8")
         fact_check = (ROOT / "skills/sf-fact-check/agents/openai.yaml").read_text(encoding="utf-8")
         self.assertIn("полный цикл", general.lower())
-        self.assertIn("action-карточ", fact_check.lower())
+        self.assertIn("только доказанные фактические ошибки", fact_check.lower())
         self.assertIn("не переходи к pdf автоматически", fact_check.lower())
 
     def test_runtime_requirements_and_preflight_are_declared(self):

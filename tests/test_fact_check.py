@@ -75,6 +75,60 @@ class FactCheckTests(unittest.TestCase):
         self.assertEqual(receipt["truth_and_source_quality"], "NOT_AUTHENTICATED_BY_SCRIPT")
         self.assertEqual(before, {p: p.read_bytes() for p in before})
 
+    def test_errors_only_cli_filters_mixed_legacy_report(self):
+        report = self.report
+        report["scope"]["coverage"] = "partial"
+        source = external()
+        report["evidence"].append(source)
+        for index, status in enumerate(("outdated", "confirmed", "context_dependent",
+                                        "unverified", "disputed", "not_checked"), start=2):
+            claim = copy.deepcopy(report["claims"][0])
+            claim["id"] = f"FC-{index:03}"
+            claim["kind"] = "technical"
+            assessment = claim["assessment"]
+            assessment.update(status=status, evidence_ids=[source["id"]])
+            if status in {"confirmed", "not_checked"}:
+                assessment["proposal"] = None
+            elif status != "outdated":
+                assessment.update(proposal={"kind": "question", "text": "Legacy editorial question?"},
+                                  decision_required=True)
+            report["claims"].append(claim)
+        report_path = self.root / "audit.json"
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        result = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPT), "--report",
+                                 str(report_path), "--errors-only"], capture_output=True, text=True,
+                                encoding="utf-8", timeout=10, check=True)
+        self.assertEqual([line.split()[0] for line in result.stdout.splitlines() if line.startswith("FC-")],
+                         ["FC-001", "FC-002"])
+        for expected in ("«2+1=5»", "Исправление: 2+1=3", "2+1 = 3", source["locator"], source["url"]):
+            self.assertIn(expected, result.stdout)
+        self.assertNotIn("Legacy editorial question", result.stdout)
+        self.assertNotIn("pending_decisions", result.stdout)
+        self.assertEqual(F.validate(report)["pending_decisions"], ["FC-001", "FC-002"])
+
+    def test_empty_editor_view_reflects_actual_coverage(self):
+        report = self.report
+        report["claims"][0]["assessment"].update(status="confirmed", proposal=None)
+        for coverage, reviewed, expected in (
+            ("complete", ["document"], "Фактических ошибок не обнаружено."),
+            ("partial", ["document"], "В проверенной части фактических ошибок не обнаружено."),
+            ("partial", [], "Проверка не выполнена."),
+        ):
+            with self.subTest(coverage=coverage, reviewed=reviewed):
+                report["scope"].update(coverage=coverage, reviewed_units=reviewed)
+                if not reviewed:
+                    report["claims"][0]["assessment"]["status"] = "not_checked"
+                path = self.root / "audit.json"
+                path.write_text(json.dumps(report), encoding="utf-8")
+                self.assertEqual(F.check(path, errors_only=True), expected)
+
+    def test_errors_only_rejects_invalid_arithmetic_before_rendering(self):
+        self.report["evidence"][0]["result"] = "5"
+        path = self.root / "audit.json"
+        path.write_text(json.dumps(self.report), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "incorrect"):
+            F.check(path, errors_only=True)
+
     def test_changed_input_hash_is_blocked(self):
         self.input.write_text("2+1=3", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "hash mismatch"):

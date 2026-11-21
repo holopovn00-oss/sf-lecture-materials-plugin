@@ -178,9 +178,8 @@ def decimal_arithmetic(expression, precision=50):
 
 
 def decision_required(claim):
-    assessment = claim["assessment"]
-    # Legacy reports remain conservative; new reports classify proposals explicitly.
-    return assessment.get("decision_required", assessment["proposal"] is not None)
+    # Older reports may flag optional questions or qualifications for review.
+    return claim["assessment"]["status"] in {"error", "outdated"}
 
 
 def evidence_rows(rows):
@@ -279,7 +278,7 @@ def validate(report, previous=None):
         check_anchor(row["anchor"], units)
         assessment = row["assessment"]
         keys(assessment, "status rationale evidence_ids proposal" + (" decision_required" if "decision_required" in assessment else ""))
-        require(type(decision_required(row)) is bool, "decision_required must be boolean")
+        require(type(assessment.get("decision_required", False)) is bool, "decision_required must be boolean")
         status, ids = assessment["status"], assessment["evidence_ids"]
         require(status in STATUSES and nonempty(assessment["rationale"]), "Missing status or reasoning")
         require(strings(ids) and len(set(ids)) == len(ids) and set(ids) <= set(evidence), "Unknown/repeated evidence reference")
@@ -289,10 +288,10 @@ def validate(report, previous=None):
                 require(any(evidence[i]["kind"] in SOURCE_KINDS for i in ids),
                         "Non-arithmetic claim requires external evidence")
         proposal = assessment["proposal"]
-        if status in {"error", "outdated"}:
-            require(proposal is not None, "Discrepancy needs a proposed correction or clarification")
-            require(decision_required(row), "Confirmed errors require a human decision")
-        require(not decision_required(row) or proposal is not None, "A required decision needs a proposal")
+        if decision_required(row):
+            require(proposal is not None, "Discrepancy needs a proposed correction")
+            require(assessment.get("decision_required", True), "Confirmed errors require a human decision")
+        require(not assessment.get("decision_required") or proposal is not None, "A required decision needs a proposal")
         if proposal is not None:
             keys(proposal, "kind text")
             require(proposal["kind"] in {"correction", "qualification", "question"} and nonempty(proposal["text"]),
@@ -345,11 +344,47 @@ def validate(report, previous=None):
             "human_authority": "RECORDED_NOT_AUTHENTICATED", "input_write": "NEVER"}
 
 
-def check(report_path, previous_path=None):
+def format_errors(report):
+    """Render the editor's view of a validated report."""
+    sources = {row["id"]: row for row in report["evidence"]}
+    cards = []
+    for claim in report["claims"]:
+        if not decision_required(claim):
+            continue
+        anchor = claim["anchor"]
+        assessment = claim["assessment"]
+        lines = [
+            f'{claim["id"]} · {anchor["unit_id"]} [{anchor["start"]}, {anchor["end"]})',
+            f'В лекции: «{anchor["quote"]}»',
+            f'Ошибка: {assessment["rationale"]}',
+        ]
+        proposal = assessment["proposal"]
+        if proposal["kind"] != "question":
+            lines.append(f'Исправление: {proposal["text"]}')
+        for evidence_id in assessment["evidence_ids"]:
+            source = sources[evidence_id]
+            if source["kind"] == "calculation":
+                lines.append(f'Расчёт: {source["expression"]} = {source["result"]}')
+            else:
+                lines.append(f'Источник: {source["creator"]}, {source["title"]}, '
+                             f'{source["locator"]}. {source["url"]}')
+        cards.append("\n".join(lines))
+    if cards:
+        return "\n\n".join(cards)
+    if not report["scope"]["reviewed_units"]:
+        return "Проверка не выполнена."
+    if report["scope"]["coverage"] == "partial":
+        return "В проверенной части фактических ошибок не обнаружено."
+    return "Фактических ошибок не обнаружено."
+
+
+def check(report_path, previous_path=None, *, errors_only=False):
     raw = Path(report_path).read_bytes()
     previous_raw = Path(previous_path).read_bytes() if previous_path else None
-    result = validate(json.loads(raw.decode("utf-8-sig")),
-                      json.loads(previous_raw.decode("utf-8-sig")) if previous_raw is not None else None)
+    report = json.loads(raw.decode("utf-8-sig"))
+    result = validate(report, json.loads(previous_raw.decode("utf-8-sig")) if previous_raw is not None else None)
+    if errors_only:
+        return format_errors(report)
     result["report_sha256"] = hashlib.sha256(raw).hexdigest().upper()
     result["previous_report_sha256"] = hashlib.sha256(previous_raw).hexdigest().upper() if previous_raw is not None else None
     return result
@@ -359,13 +394,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--previous-report", type=Path)
+    parser.add_argument("--errors-only", action="store_true", help="Print only evidenced factual errors for the editor")
     args = parser.parse_args()
     try:
-        result = check(args.report, args.previous_report)
+        result = check(args.report, args.previous_report, errors_only=args.errors_only)
     except (ValueError, TypeError, KeyError, OSError, SyntaxError, ArithmeticError, RecursionError) as exc:
         print(json.dumps({"status": "BLOCKED", "reason": str(exc)}, ensure_ascii=False))
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(result if args.errors_only else json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
