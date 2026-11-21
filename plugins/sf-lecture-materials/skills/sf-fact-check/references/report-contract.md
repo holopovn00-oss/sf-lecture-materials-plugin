@@ -37,14 +37,14 @@ Context — непустая строка с условиями/смыслом �
 
 ## Вывод и предложение
 
-Assessment: `{status, rationale, evidence_ids, proposal, decision_required}`. Новые отчеты явно задают boolean decision_required; для старых записей отсутствие поля означает proposal != null. Status:
+Assessment: `{status, rationale, evidence_ids, proposal, decision_required}`. Новые отчеты явно задают boolean decision_required по статусу. В старых записях список ошибок также определяется статусом. Status:
 `confirmed`, `error`, `outdated`, `disputed`, `unverified`, `context_dependent`, `not_checked`.
 
 Confirmed/error/outdated/disputed требуют доказательств. Неарифметическое утверждение нельзя подтвердить одним числовым расчётом. Rationale объясняет цепочку доказательства и предел вывода. Disputed требует явно изложить противоречие; число ссылок само по себе его не удостоверяет.
 
 Proposal — null или `{kind, text}`, где kind — `correction`, `qualification` или `question`. Для error/outdated нужно конкретное предложение. Категорическая correction требует доказательств и статуса error/outdated. Для unverified допустим вопрос либо осторожное уточнение статуса гипотезы с обоснованием; новая фактическая формулировка без доказательств недопустима. Для confirmed/not_checked proposal=null.
 
-`decision_required:true` отмечает только реальную ошибку или существенную оговорку, предъявляемую человеку. Для error/outdated true обязателен, как и proposal. Необязательные рекомендации хранятся с false: они не блокируют полный цикл и не применяются автоматически. Любой явно заданный recheck остается блокирующим.
+`decision_required:true` ставится для `error` и `outdated`. В новом отчёте для каждого из них запиши конкретный текст исправления и доказательство. Другие статусы остаются во внутреннем реестре. Старый флаг у вопроса или оговорки не создает карточку и не требует нового решения. Ранее явно запрошенная перепроверка остается блокирующей.
 
 ## Решение человека
 
@@ -66,10 +66,10 @@ Review: `{decision, comment, basis, execution, application}`.
 
 `python scripts/verify_fact_check.py --report <абсолютный путь>`
 
-На stdout — JSON, код 0 при `FACT_CHECK_RECORD_VALIDATED`, 1 при `BLOCKED`. При необходимости сохрани stdout в отдельный check.json. Проверка не пишет вход/отчёт и не подключается к сети. В результате отдельно видны unresolved findings, pending decisions, actionable findings (decision_required=true), retained findings, непроверенные утверждения, записанный охват и пересчитанные выражения. Unresolved findings не включает выполненную поправку или явное допущение без предложения; оставленная ошибка остаётся замечанием. Status counts всегда описывает исходный вход данного отчёта. Истина, независимость исследований и полнота инвентаризации остаются `NOT_AUTHENTICATED_BY_SCRIPT`, полномочия человека — `RECORDED_NOT_AUTHENTICATED`.
+На stdout — JSON, код 0 при `FACT_CHECK_RECORD_VALIDATED`, 1 при `BLOCKED`. При необходимости сохрани stdout в отдельный check.json. Проверка не пишет вход/отчёт и не подключается к сети. В результате отдельно видны unresolved findings, pending decisions, actionable findings (error/outdated), retained findings, непроверенные утверждения, записанный охват и пересчитанные выражения. Unresolved findings не включает выполненную поправку или явное допущение без предложения; оставленная ошибка остаётся замечанием. Status counts всегда описывает исходный вход данного отчёта. Истина, независимость исследований и полнота инвентаризации остаются `NOT_AUTHENTICATED_BY_SCRIPT`, полномочия человека — `RECORDED_NOT_AUTHENTICATED`.
 
 ## Предъявление и handoff полного цикла
 
-JSON содержит все claims. В чат попадают только action-карточки по [правилам предъявления](human-review.md): реальная ошибка или оговорка, которая меняет учебный смысл и требует решения. Отсутствие action-карточки не превращает coverage в независимую гарантию.
+JSON содержит все claims. В чат попадают только action-карточки по [правилам предъявления](human-review.md): доказанные фактические ошибки со статусами error/outdated. Вызов с `--errors-only` возвращает текст для редактора. Отсутствие action-карточки не превращает coverage в независимую гарантию.
 
 Для полного цикла `fact-check.json` связывается с исходной и выбранной новой LectureText записью через [full-cycle handoff 1.0.0](../../sf-lecture-materials/references/full-cycle-handoff-1.0.0.md). Handoff не меняет этот schema_version и не заменяет фактчек. Он допускает PDF только при закрытых решениях, примененных `correct`, записанных `keep` и полном охвате либо явном принятии ограничения.

@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 from test_json_content import H, fixture
+from test_fact_check import external
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "plugins/sf-lecture-materials/scripts/verify_full_cycle_handoff.py"
@@ -138,6 +139,8 @@ class FullCycleHandoffTests(unittest.TestCase):
 
     def test_pending_actionable_decision_blocks(self):
         report = self.report(decision="pending", execution="pending")
+        report["evidence"] = [external()]
+        report["claims"][0]["assessment"].update(status="error", evidence_ids=["E2"])
         with self.assertRaisesRegex(ValueError, "pending"):
             GATE.check(self.handoff(self.write_report(report)))
 
@@ -161,10 +164,18 @@ class FullCycleHandoffTests(unittest.TestCase):
 
     def test_minor_proposal_does_not_block_unchanged_lecture(self):
         report = self.report(decision="pending", execution="pending")
-        report["claims"][0]["assessment"]["decision_required"] = False
         self.selected_path.write_bytes(self.checked_path.read_bytes())
-        result = GATE.check(self.handoff(self.write_report(report)))
-        self.assertEqual(result["pdf_gate"], "READY_FOR_PDF")
+        for legacy_flag in (None, False, True):
+            with self.subTest(legacy_flag=legacy_flag):
+                if legacy_flag is not None:
+                    report["claims"][0]["assessment"]["decision_required"] = legacy_flag
+                result = GATE.check(self.handoff(self.write_report(report)))
+                self.assertEqual(result["pdf_gate"], "READY_FOR_PDF")
+
+    def test_explicit_recheck_of_qualification_still_blocks(self):
+        report = self.report(decision="recheck", execution="pending")
+        with self.assertRaisesRegex(ValueError, "pending"):
+            GATE.check(self.handoff(self.write_report(report)))
 
     def test_partial_coverage_requires_explicit_limit_acceptance(self):
         report_path = self.write_report(self.report(coverage="partial"))
